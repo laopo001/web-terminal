@@ -1,0 +1,9 @@
+# 复制为 config.yaml 后修改。token 首次启动自动生成，保存在 .data/token。
+host: 127.0.0.1
+port: 3840
+# 默认工作目录及文件访问范围为当前用户的 home，可按需指定绝对路径。
+# defaultCwd: /home/yourname/projects
+# roots:
+#   - /home/yourname
+# shell: /bin/zsh
+dataDir: .data

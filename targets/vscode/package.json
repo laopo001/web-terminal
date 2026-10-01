@@ -1,0 +1,44 @@
+{
+  "name": "web-terminal",
+  "displayName": "Web Terminal",
+  "description": "Open an existing Web Terminal server in VS Code.",
+  "publisher": "dadigua",
+  "version": "0.1.2",
+  "main": "./extension.cjs",
+  "files": ["extension.cjs", "README.md", "media/**"],
+  "engines": { "vscode": "^1.96.0" },
+  "extensionKind": ["workspace"],
+  "activationEvents": ["onCommand:webTerminal.open", "onWebviewPanel:webTerminal.panel", "onView:webTerminal.sidebar"],
+  "contributes": {
+    "commands": [
+      { "command": "webTerminal.showSidebar", "title": "Show Sidebar", "category": "Web Terminal" },
+      { "command": "webTerminal.open", "title": "Open", "category": "Web Terminal", "icon": "$(open-preview)" },
+      { "command": "webTerminal.reload", "title": "Reload", "category": "Web Terminal", "icon": "$(refresh)" },
+      { "command": "webTerminal.setServerUrl", "title": "Set Server URL", "category": "Web Terminal", "icon": "$(settings-gear)" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{ "id": "webTerminal", "title": "Web Terminal", "icon": "media/terminal.svg" }]
+    },
+    "views": {
+      "webTerminal": [{ "id": "webTerminal.sidebar", "name": "Web Terminal", "type": "webview" }]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "webTerminal.open", "when": "view == webTerminal.sidebar", "group": "navigation@1" },
+        { "command": "webTerminal.reload", "when": "view == webTerminal.sidebar", "group": "navigation@2" },
+        { "command": "webTerminal.setServerUrl", "when": "view == webTerminal.sidebar", "group": "navigation@3" }
+      ]
+    },
+    "configuration": {
+      "title": "Web Terminal",
+      "properties": {
+        "webTerminal.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:3840",
+          "scope": "machine",
+          "description": "HTTP(S) root URL of an independently running Web Terminal server."
+        }
+      }
+    }
+  }
+}

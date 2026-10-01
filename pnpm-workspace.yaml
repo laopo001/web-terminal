@@ -1,0 +1,8 @@
+allowBuilds:
+  node-pty: true
+  sharp: true
+  esbuild: true
+  electron: true
+  keytar: false
+  '@vscode/vsce-sign': false
+  electron-winstaller: false

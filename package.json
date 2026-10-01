@@ -1,0 +1,49 @@
+{
+  "name": "web-terminal",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server/index.ts --dev",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx src/server/index.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "tsc --noEmit",
+    "build:clients": "tsx scripts/build-clients.ts",
+    "package:vscode": "pnpm build:clients && tsx scripts/package-vscode.ts",
+    "electron": "pnpm build:clients && electron dist-clients/electron",
+    "package:electron:win": "pnpm build:clients && tsx scripts/package-electron.ts --win",
+    "package:electron:linux": "pnpm build:clients && tsx scripts/package-electron.ts --linux"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "node-pty": "^1.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "^0.34.5",
+    "ws": "^8.18.3",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.9.2",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.0",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^5.1.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
+  },
+  "engines": { "node": ">=22" },
+  "packageManager": "pnpm@11.12.0"
+}

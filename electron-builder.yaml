@@ -1,0 +1,14 @@
+appId: dev.web-terminal.client
+productName: Web Terminal
+directories:
+  app: dist-clients/electron
+  output: release
+files:
+  - main.cjs
+  - package.json
+asar: true
+npmRebuild: false
+win:
+  target: zip
+  signAndEditExecutable: false
+artifactName: Web-Terminal-${version}-${os}-${arch}.${ext}
