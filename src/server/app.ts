@@ -91,15 +91,18 @@ export async function createApp(config: Config, options: { dev?: boolean; static
         const message = JSON.parse(raw.toString());
         if (!sessionId) {
           if (message.type !== 'auth' || !validToken(message.token, config.token)) { ws.close(4401, 'token 无效'); return; }
+          if (message.protocol !== 2) { send(ws, { type: 'error', message: '终端协议已更新，请刷新页面' }); ws.close(4406, '请刷新页面'); return; }
           if (typeof message.sessionId !== 'string') throw new Error('会话无效');
           const session = sessions.get(message.sessionId);
           sessionId = session.info.id;
           clearTimeout(timer);
-          sessions.attach(sessionId, ws, message.cols, message.rows);
+          void sessions.attach(sessionId, ws, message.cols, message.rows).catch(error => { send(ws, { type: 'error', message: error.message }); ws.close(4404, '会话不可用'); });
         } else if (message.type === 'input' && typeof message.data === 'string') {
           sessions.input(sessionId, ws, message.data);
-        } else if (message.type === 'resize') {
-          sessions.resize(sessionId, ws, message.cols, message.rows);
+        } else if (message.type === 'paste' && typeof message.text === 'string' && typeof message.submit === 'boolean') {
+          sessions.paste(sessionId, ws, message.text, message.submit);
+        } else if (message.type === 'resize' || message.type === 'claim') {
+          sessions.resize(sessionId, ws, message.cols, message.rows, message.type === 'claim');
         } else throw new Error('消息格式无效');
       } catch (error) {
         send(ws, { type: 'error', message: error instanceof Error ? error.message : '请求失败' });
@@ -125,7 +128,7 @@ export async function createApp(config: Config, options: { dev?: boolean; static
     res.status(status).json({ error: message });
   });
   return { app, server, sessions, async close() {
-    sessions.shutdown();
+    await sessions.shutdown();
     for (const ws of wss.clients) ws.terminate();
     wss.close();
     await closeVite?.();

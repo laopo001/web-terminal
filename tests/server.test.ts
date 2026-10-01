@@ -27,15 +27,16 @@ async function fixture() {
 async function connect(url: string, token: string, id: string, cols = 100, rows = 30) {
   const ws = new WebSocket(url.replace('http', 'ws') + '/ws');
   let output = '', replay = '';
-  ws.on('message', raw => { const m = JSON.parse(raw.toString()); if (m.type === 'output') output += m.data; else if (m.type === 'replay') replay += m.data; });
+  const messages: any[] = [];
+  ws.on('message', raw => { const m = JSON.parse(raw.toString()); messages.push(m); if (m.type === 'output') output += m.data; else if (m.type === 'snapshot') replay += m.data; });
   await once(ws, 'open');
   const ready = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('ready timeout')), 5000);
     ws.on('message', raw => { if (JSON.parse(raw.toString()).type === 'ready') { clearTimeout(timeout); resolve(); } });
   });
-  ws.send(JSON.stringify({ type: 'auth', token, sessionId: id, cols, rows }));
+  ws.send(JSON.stringify({ type: 'auth', protocol: 2, token, sessionId: id, cols, rows }));
   await ready;
-  return { ws, get output() { return output; }, get replay() { return replay; }, send(data: string) { ws.send(JSON.stringify({ type: 'input', data })); },
+  return { ws, messages, get output() { return output; }, get replay() { return replay; }, send(data: string) { ws.send(JSON.stringify({ type: 'input', data })); },
     async waitFor(text: string) {
       const start = Date.now();
       while (!output.includes(text)) { if (Date.now() - start > 5000) throw new Error(`没有收到 ${text}: ${output}`); await new Promise(r => setTimeout(r, 25)); }
@@ -85,7 +86,7 @@ test('WebSocket token 校验，真实 PTY 输入，断线重连保留 Shell、�
     const wrong = new WebSocket(f.url().replace('http', 'ws') + '/ws');
     await once(wrong, 'open');
     const closed = once(wrong, 'close');
-    wrong.send(JSON.stringify({ type: 'auth', token: 'wrong', sessionId: 'none' }));
+    wrong.send(JSON.stringify({ type: 'auth', protocol: 2, token: 'wrong', sessionId: 'none' }));
     assert.equal((await closed)[0], 4401);
     const response = await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const { id } = await response.json();
@@ -115,5 +116,55 @@ test('目录选择器只列出允许范围内的目录，拒绝越界和未认�
     assert.equal(nested.parent, f.workspace);
     assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(f.root))).status, 403);
     assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(join(f.workspace, 'outside')))).status, 403);
+  } finally { await f.close(); }
+});
+
+test('多窗口共享快照，仅控制窗口改变 PTY 尺寸，主动接管后同步', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const first = await connect(f.url(), f.config.token, id, 100, 30);
+    first.send("printf '\\033[2J\\033[HREMOVED\\033[2J\\033[3J\\033[HCUR%s\\n' RENT\r"); await first.waitFor('CURRENT');
+    const second = await connect(f.url(), f.config.token, id, 40, 12);
+    const snapshot = second.messages.find(m => m.type === 'snapshot');
+    assert.equal(snapshot.cols, 100); assert.equal(snapshot.rows, 30); assert.equal(snapshot.controller, false);
+    assert(!snapshot.data.includes('REMOVED')); assert(snapshot.data.includes('CURRENT'));
+    second.ws.send(JSON.stringify({ type: 'resize', cols: 45, rows: 13 }));
+    second.send("printf 'size:%s\\n' \"$(stty size)\"\r"); await second.waitFor('size:30 100');
+    second.ws.send(JSON.stringify({ type: 'claim', cols: 45, rows: 13 }));
+    second.send("printf 'claimed:%s\\n' \"$(stty size)\"\r"); await second.waitFor('claimed:13 45'); await first.waitFor('claimed:13 45');
+    assert(first.messages.some(m => m.type === 'snapshot' && m.cols === 45 && m.rows === 13));
+    first.ws.terminate(); second.ws.terminate();
+  } finally { await f.close(); }
+});
+
+test('OSC 标题按分块解析，前台命令和目录可查询', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const terminal = await connect(f.url(), f.config.token, id);
+    await mkdir(join(f.workspace, 'nested'));
+    terminal.send("cd nested; printf '\\033]2;测试对话'; printf '标题\\007'; sleep 10\r");
+    const deadline = Date.now() + 3000;
+    let info;
+    do { info = await f.runtime.sessions.current(id); if (info.title === '测试对话标题' && info.processName?.endsWith('sleep')) break; await new Promise(r => setTimeout(r, 25)); } while (Date.now() < deadline);
+    assert.equal(info.title, '测试对话标题'); assert.match(info.processName!, /sleep$/); assert.equal(info.cwd, join(f.workspace, 'nested'));
+    terminal.ws.terminate();
+  } finally { await f.close(); }
+});
+
+test('服务端按实时粘贴模式生成输入，图片路径不自动提交', async () => {
+  const f = await fixture();
+  try {
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const terminal = await connect(f.url(), f.config.token, id);
+    // 用原始模式读字节，验证发送协议，避免依赖 Shell 的粘贴提示。
+    const program = `import os,tty; tty.setraw(0); os.write(1,b'\\x1b[?2004hRAW_'+b'READY'); data=b''\nwhile not data.endswith(b'\\r'): data+=os.read(0,1024)\nos.write(1,b'\\r\\nBYTES:'+data.hex().encode()+b'\\r\\n')`;
+    terminal.send(`python3 -c ${"'" + program.replaceAll("'", "'\\''") + "'"}\r`);
+    await terminal.waitFor('RAW_READY');
+    terminal.ws.send(JSON.stringify({ type: 'paste', text: '/tmp/image.png', submit: false }));
+    terminal.ws.send(JSON.stringify({ type: 'paste', text: '描述图片', submit: true }));
+    const expected = Buffer.from('\x1b[200~/tmp/image.png\x1b[201~\x1b[200~描述图片\x1b[201~\r').toString('hex');
+    await terminal.waitFor('BYTES:' + expected); terminal.ws.terminate();
   } finally { await f.close(); }
 });

@@ -23,12 +23,15 @@ export interface FileInfo {
   height?: number;
 }
 export type ClientMessage =
-  | { type: 'auth'; token: string; sessionId: string; cols: number; rows: number }
+  | { type: 'auth'; protocol: 2; token: string; sessionId: string; cols: number; rows: number }
   | { type: 'input'; data: string }
-  | { type: 'resize'; cols: number; rows: number };
+  | { type: 'paste'; text: string; submit: boolean }
+  | { type: 'resize'; cols: number; rows: number }
+  | { type: 'claim'; cols: number; rows: number };
 export type ServerMessage =
   | { type: 'ready'; session: SessionInfo }
-  | { type: 'replay'; data: string }
+  | { type: 'snapshot'; data: string; cols: number; rows: number; controller: boolean }
+  | { type: 'control'; controller: boolean }
   | { type: 'output'; data: string }
   | { type: 'exit'; exitCode: number }
   | { type: 'error'; message: string };

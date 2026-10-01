@@ -5,19 +5,23 @@ import type { ClientMessage, FileInfo, ServerInfo, ServerMessage, SessionInfo } 
 import { isImagePath, quoteForShell } from './paths';
 import { api, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
 import { pathLinkProvider } from './links';
-import { arrowSequence, draftSubmission } from './terminalKeys';
+import { arrowSequence } from './terminalKeys';
 import { CloseSessionDialog } from './CloseSessionDialog';
 import { MessageToast } from './MessageToast';
 import { DirectoryPicker } from './DirectoryPicker';
 import { useWorkspaceFolders } from './useWorkspaceFolders';
 import { SessionTabs } from './SessionTabs';
+import { enableTouchScroll } from './terminalTouch';
+import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection } from './terminalInteraction';
+import { suppressTerminalResponses } from './terminalResponses';
+import { useVisualViewport } from './useVisualViewport';
 import { UploadThumbnail } from './UploadThumbnail';
 
 const tokenKey = 'web-terminal.token';
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-function pastePath(path: string): string { return `\x1b[200~${quoteForShell(path)}\x1b[201~`; }
 
 export default function App() {
+  useVisualViewport();
   const [token, setToken] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [authValue, setAuthValue] = useState('');
@@ -33,9 +37,17 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [uploads, setUploads] = useState<{ id: number; file: File; state: string; failed: boolean }[]>([]);
   const uploadId = useRef(0);
+  const uploadFailures = useRef(new Map<number, string>());
   const [preview, setPreview] = useState<{ file: FileInfo; url: string | null; loading: boolean; error?: string } | null>(null);
   const [hover, setHover] = useState<{ file: FileInfo; url: string | null; x: number; y: number; error?: string } | null>(null);
   const [draft, setDraft] = useState('');
+  const composing = useRef(false);
+  const compositionEnded = useRef(0);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const readyRef = useRef(false);
+  const claimRef = useRef<() => void>(() => {});
+  const draftInput = useRef<HTMLInputElement>(null);
   const workspaceFolders = useWorkspaceFolders();
   const [creating, setCreating] = useState(false);
   const [pendingClose, setPendingClose] = useState<SessionInfo | null>(null);
@@ -128,10 +140,15 @@ export default function App() {
     revokeHover(); revokePreview();
     if (!selected || !token || !terminalHost.current) { setStatus('未连接'); return; }
     const sessionId = selected;
-    let disposed = false, reconnectTimer: number | undefined, retry = 0, ws: WebSocket | null = null, replaying = true;
+    readyRef.current = false;
+    let disposed = false, reconnectTimer: number | undefined, retry = 0, ws: WebSocket | null = null;
     const lineBases = new Map<number, string>();
+    let renderQueue = Promise.resolve();
     const term = new Terminal({ cursorBlink: true, fontFamily: 'Cascadia Code, JetBrains Mono, Consolas, monospace', fontSize: 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
+    const responses = suppressTerminalResponses(term);
     const fit = new FitAddon(); term.loadAddon(fit); term.open(terminalHost.current); termRef.current = term;
+    const selection = preferTextSelection(term);
+    const scrolling = preferScrollback(term);
     // 让浏览器产生带图片数据的 paste 事件，不把 Ctrl+V 编码成远端的 ^V。
     term.attachCustomKeyEventHandler(event => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'v') return false;
@@ -140,45 +157,78 @@ export default function App() {
     });
     let resizeTimer: number | undefined;
     let lastSize = '';
-    const resize = () => {
+    const dimensions = () => fit.proposeDimensions();
+    const resize = (claim = false) => {
       if (disposed || !terminalHost.current || terminalHost.current.clientWidth < 2 || terminalHost.current.clientHeight < 2) return;
-      fit.fit();
-      const size = `${term.cols}:${term.rows}`;
-      if (ws?.readyState === WebSocket.OPEN && size !== lastSize) {
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows } satisfies ClientMessage)); lastSize = size;
+      const proposed = dimensions();
+      if (!proposed || proposed.rows < 2) return;
+      const size = `${proposed.cols}:${proposed.rows}`;
+      if (ws?.readyState === WebSocket.OPEN && readyRef.current && (claim || size !== lastSize)) {
+        ws.send(JSON.stringify({ type: claim ? 'claim' : 'resize', ...proposed } satisfies ClientMessage)); lastSize = size;
       }
     };
-    const scheduleResize = () => { if (resizeTimer) clearTimeout(resizeTimer); resizeTimer = window.setTimeout(resize, 100); };
+    claimRef.current = () => resize(true);
+    const scheduleResize = () => { if (resizeTimer) clearTimeout(resizeTimer); resizeTimer = window.setTimeout(() => resize(), 100); };
     const observer = new ResizeObserver(scheduleResize); observer.observe(terminalHost.current);
     document.addEventListener('visibilitychange', scheduleResize);
-    resize();
-    const send = (data: string) => { if (replaying) return; if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage)); else setNotice('连接未就绪，输入未发送'); };
+    // 容器决定期望尺寸，画布严格按服务端尺寸显示；窄窗口可横向滚动。
+    const geometry = term.onRender(() => {
+      const screen = terminalHost.current?.querySelector<HTMLElement>('.xterm-screen');
+      if (screen && term.element) { term.element.style.width = `${screen.offsetWidth + 15}px`; term.element.style.height = `${screen.offsetHeight}px`; }
+    });
+    const send = (data: string) => {
+      if (disposed) return;
+      const terminalReport = isFocusReport(data) || isMouseReport(data);
+      if (ws?.readyState === WebSocket.OPEN && readyRef.current) {
+        if (!terminalReport) resize(true);
+        ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage));
+      } else if (!terminalReport) setNotice('连接未就绪，输入未发送');
+    };
     const inputDisposable = term.onData(send);
+    const touchScroll = enableTouchScroll(term, data => {
+      if (!disposed && readyRef.current && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage));
+    });
     const provider = pathLinkProvider(term, { base: row => lineBases.get(row) ?? '', activate: (path, base) => { revokeHover(); void inspect(path, base, 'preview'); }, hover: (path, base, point) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); }, leave: revokeHover });
     const linkDisposable = term.registerLinkProvider(provider);
     const connect = () => {
       if (disposed) return;
       setStatus(retry ? `重连中 · 第 ${retry} 次` : '连接中');
-      replaying = true;
+      readyRef.current = false;
       ws = null; socket.current = null;
       // 等上一条连接的写入队列排空，再重置，避免旧画面覆盖新连接。
       term.write('', () => {
       if (disposed) return;
       term.reset(); lineBases.clear();
       const connection = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`); ws = connection; socket.current = ws;
-      ws.onopen = () => { if (disposed || ws !== connection) return; lastSize = `${term.cols}:${term.rows}`; connection.send(JSON.stringify({ type: 'auth', token, sessionId, cols: term.cols, rows: term.rows } satisfies ClientMessage)); };
+      ws.onopen = () => { if (disposed || ws !== connection) return; const size = dimensions() || { cols: 80, rows: 24 }; lastSize = `${size.cols}:${size.rows}`; connection.send(JSON.stringify({ type: 'auth', protocol: 2, token, sessionId, ...size } satisfies ClientMessage)); };
       ws.onmessage = event => {
         if (disposed || ws !== connection) return;
-        try { const msg = JSON.parse(event.data) as ServerMessage;
-          if (msg.type === 'replay') { replaying = true; term.write(msg.data, () => { if (!disposed && ws === connection) replaying = false; }); }
-          else if (msg.type === 'ready') { retry = 0; setReachable(true); setStatus('已连接'); cwdRef.current = msg.session.cwd; setSessions(list => list.map(s => s.id === sessionId ? msg.session : s)); }
-          else if (msg.type === 'output') { const start = term.buffer.active.baseY + term.buffer.active.cursorY; const base = cwdRef.current; term.write(msg.data, () => { const end = term.buffer.active.baseY + term.buffer.active.cursorY; for (let row = start; row <= end; row++) lineBases.set(row, base); }); }
-          else if (msg.type === 'exit') setStatus(`Shell 已退出 · ${msg.exitCode}`);
+        let msg: ServerMessage;
+        try { msg = JSON.parse(event.data) as ServerMessage; } catch { setNotice('收到无效的终端消息'); return; }
+        renderQueue = renderQueue.then(async () => {
+          if (disposed || ws !== connection) return;
+          const write = (data: string) => new Promise<void>(resolve => term.write(data, resolve));
+          if (msg.type === 'snapshot') {
+            term.reset(); term.resize(msg.cols, msg.rows); lineBases.clear();
+            await write(msg.data);
+          } else if (msg.type === 'ready') {
+            retry = 0; readyRef.current = true; setReachable(true); setStatus('已连接');
+            cwdRef.current = msg.session.cwd; setSessions(list => list.map(s => s.id === sessionId ? msg.session : s)); resize();
+          } else if (msg.type === 'output') {
+            const start = term.buffer.active.baseY + term.buffer.active.cursorY, base = cwdRef.current;
+            await write(msg.data);
+            if (disposed) return;
+            const end = term.buffer.active.baseY + term.buffer.active.cursorY;
+            for (let row = start; row <= end; row++) lineBases.set(row, base);
+            for (const row of lineBases.keys()) if (row < term.buffer.active.baseY - 2000) lineBases.delete(row);
+          } else if (msg.type === 'exit') { readyRef.current = false; setStatus(`Shell 已退出 · ${msg.exitCode}`); }
           else if (msg.type === 'error') setNotice(msg.message);
-        } catch { setNotice('收到无效的终端消息'); }
+        }).catch(() => { if (!disposed) setNotice('终端画面恢复失败，请重新连接'); });
       };
       ws.onclose = event => {
         if (disposed || ws !== connection) return;
+        readyRef.current = false;
+        if (event.code === 4406) { setStatus('需要刷新页面'); setNotice('终端协议已更新，请刷新页面'); return; }
         if (event.code === 4401) { logout(); return; }
         if (event.code === 4404) { setStatus('会话已结束'); void api<SessionInfo[]>(token, '/api/sessions').then(setSessions).catch(error => handleApiError(error, '会话同步失败')); return; }
         retry++; const delay = Math.min(30_000, 700 * 2 ** Math.min(retry, 6));
@@ -189,7 +239,7 @@ export default function App() {
       });
     };
     connect();
-    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
+    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; responses.dispose(); selection.dispose(); scrolling.dispose(); touchScroll.dispose(); geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
   }, [selected, token, inspect, logout, revokeHover, revokePreview, handleApiError]);
 
   const uploadFile = (file: File) => {
@@ -198,7 +248,7 @@ export default function App() {
     if (!imageTypes.has(file.type)) { setNotice('仅支持 PNG、JPEG、WebP、GIF 图片'); return; }
     if (file.size > (info?.maxUploadBytes ?? 20 * 1024 * 1024)) { setNotice('图片超过上传大小限制'); return; }
     const itemId = ++uploadId.current;
-    const update = (state: string, failed = false) => setUploads(items => items.map(item => item.id === itemId ? { ...item, state, failed } : item));
+    const update = (state: string, failed = false) => { if (failed) uploadFailures.current.set(itemId, id); else uploadFailures.current.delete(itemId); setUploads(items => items.map(item => item.id === itemId ? { ...item, state, failed } : item)); };
     setUploads(items => [...items, { id: itemId, file, state: '排队上传…', failed: false }]);
     uploadQueue.current = uploadQueue.current.catch(() => undefined).then(async () => {
       if (selectedRef.current !== id) { update('已切换会话，未上传', true); return; }
@@ -207,9 +257,8 @@ export default function App() {
       try {
         const result = await api<FileInfo>(key, `/api/sessions/${encodeURIComponent(id)}/uploads`, { method: 'POST', body: form });
         if (selectedRef.current !== id) { update('已上传至原会话，未插入路径', true); return; }
-        const data = pastePath(result.path);
-        if (socket.current?.readyState === WebSocket.OPEN) {
-          socket.current.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage));
+        if (socket.current?.readyState === WebSocket.OPEN && readyRef.current) {
+          claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text: quoteForShell(result.path), submit: false } satisfies ClientMessage));
           update('已插入路径');
         } else { update('已上传，路径已保存到草稿'); setDraft(value => value + ' ' + quoteForShell(result.path)); setNotice('终端断线，路径已保存在草稿中'); }
       } catch (error) { if (error instanceof UnauthorizedError) logout(); else update(errorText(error), true); }
@@ -227,11 +276,23 @@ export default function App() {
     catch (error) { setCloseError(errorText(error)); handleApiError(error, '结束失败'); }
     finally { setClosing(false); }
   };
-  const sendKey = (data: string): boolean => { if (socket.current?.readyState !== WebSocket.OPEN) { setNotice('连接未就绪，输入未发送'); return false; } socket.current.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage)); termRef.current?.focus(); return true; };
-  const sendDraft = () => {
-    if (!draft) return;
-    if (status !== '已连接') { setNotice('连接未就绪，文字已保留'); return; }
-    if (sendKey(draftSubmission(draft, termRef.current?.modes.bracketedPasteMode ?? false))) setDraft('');
+  const sendKey = (data: string): boolean => { if (socket.current?.readyState !== WebSocket.OPEN || !readyRef.current) { setNotice('连接未就绪，输入未发送'); return false; } claimRef.current(); socket.current.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage)); if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) termRef.current?.focus(); return true; };
+  const sendDraft = async () => {
+    if (sendingRef.current || composing.current || Date.now() - compositionEnded.current < 80) return;
+    const id = selectedRef.current;
+    if (!id || !draft.trim()) return;
+    const text = draft;
+    sendingRef.current = true; setSending(true);
+    try {
+      await uploadQueue.current;
+      if ([...uploadFailures.current.values()].includes(id)) { setNotice('图片尚未上传成功，请重试或移除后发送'); return; }
+      if (selectedRef.current !== id) return;
+      if (!readyRef.current) { setNotice('连接未就绪，文字已保留'); return; }
+      if (socket.current?.readyState === WebSocket.OPEN) {
+        claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text, submit: true } satisfies ClientMessage));
+        setDraft(value => value === text ? '' : value); draftInput.current?.focus();
+      }
+    } finally { sendingRef.current = false; setSending(false); }
   };
   const onPaste = (event: React.ClipboardEvent) => { const file = [...event.clipboardData.items].find(item => item.kind === 'file' && imageTypes.has(item.type))?.getAsFile(); if (file) { event.preventDefault(); event.stopPropagation(); void uploadFile(file); } };
   const onDrop = (event: React.DragEvent) => { event.preventDefault(); const file = [...event.dataTransfer.files].find(f => imageTypes.has(f.type)); if (file) void uploadFile(file); };
@@ -243,5 +304,5 @@ export default function App() {
     <SessionTabs sessions={sessions} selected={selected} status={status} reachable={reachable} onSelect={setSelected} onClose={session => { setCloseError(''); setPendingClose(session); }} />
     <div className="tab-actions"><button title="创建会话" aria-label="创建会话" onClick={() => setCreating(value => !value)}>＋</button></div>
     {creating && <DirectoryPicker token={token} initialPath={workspaceFolders[0]?.path || current?.cwd || info?.defaultCwd || ''} home={info?.defaultCwd || ''} folders={workspaceFolders} busy={busy} onCreate={createSession} onClose={() => setCreating(false)} onUnauthorized={logout} />}
-  </header><div className="workspace"><div className="content"><div className="terminal-pane">{!selected && <div className="empty-session"><strong>命令行终端</strong><p>{sessions.length ? '选择已有会话继续使用，或新建一个 Shell。' : '新建一个普通 Shell，运行你需要的命令。'}</p><button className="primary" disabled={busy} onClick={() => setCreating(true)}>新建 Shell</button></div>}<div className="terminal-wrap" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}><div ref={terminalHost} className="terminal-host" /></div><div className="mobile-keys" role="toolbar" aria-label="触屏终端快捷键"><button onClick={() => sendKey('\x1b')}>Esc</button><button onClick={() => sendKey('\t')}>Tab</button><button onClick={() => sendKey('\x03')}>Ctrl C</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onPointerDown={e => e.preventDefault()} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}<button onClick={() => fileInput.current?.click()}>上传</button></div><div className="draft-row"><input aria-label="待发送文字" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) sendDraft(); } }} placeholder="断线时可暂存文字；回车发送" /><button onClick={sendDraft} disabled={!draft}>发送</button></div>{uploads.map(item => <div key={item.id} className={`upload-state ${item.failed ? 'error' : ''}`}><UploadThumbnail file={item.file} /><span>{item.file.name} · {item.state}</span>{item.failed && selected && <button onClick={() => { setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}<button onClick={() => setUploads(items => items.filter(x => x.id !== item.id))}>关闭</button></div>)}</div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}</div></div>{notice.text && <MessageToast key={notice.id} message={notice.text} onClose={clearNotice} />}{pendingClose && <CloseSessionDialog name={pendingClose.name} busy={closing} error={closeError} onCancel={() => setPendingClose(null)} onConfirm={() => void endSession(pendingClose)} />}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadFile(file); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
+  </header><div className="workspace"><div className="content"><div className="terminal-pane">{!selected && <div className="empty-session"><strong>命令行终端</strong><p>{sessions.length ? '选择已有会话继续使用，或新建一个 Shell。' : '新建一个普通 Shell，运行你需要的命令。'}</p><button className="primary" disabled={busy} onClick={() => setCreating(true)}>新建 Shell</button></div>}<div className="terminal-wrap" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}><div ref={terminalHost} className="terminal-host" /></div><div className="mobile-keys" onPointerDown={e => { if ((e.target as HTMLElement).closest('button')) e.preventDefault(); }} role="toolbar" aria-label="触屏终端快捷键"><button onClick={() => sendKey('\x1b')}>Esc</button><button onClick={() => sendKey('\t')}>Tab</button><button onClick={() => sendKey('\x03')}>Ctrl C</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onPointerDown={e => e.preventDefault()} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}<button onClick={() => fileInput.current?.click()}>上传</button></div><div className="draft-row"><input ref={draftInput} aria-label="待发送文字" enterKeyHint="send" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} onPasteCapture={onPaste} onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); } }} placeholder="断线时可暂存文字；回车发送" /><button onPointerDown={e => e.preventDefault()} onClick={() => void sendDraft()} disabled={!draft || sending}>{sending ? '等待上传…' : '发送'}</button></div>{uploads.map(item => <div key={item.id} className={`upload-state ${item.failed ? 'error' : ''}`}><UploadThumbnail file={item.file} /><span>{item.file.name} · {item.state}</span>{item.failed && selected && <button onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}<button onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); }}>关闭</button></div>)}</div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}</div></div>{notice.text && <MessageToast key={notice.id} message={notice.text} onClose={clearNotice} />}{pendingClose && <CloseSessionDialog name={pendingClose.name} busy={closing} error={closeError} onCancel={() => setPendingClose(null)} onConfirm={() => void endSession(pendingClose)} />}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadFile(file); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
 }

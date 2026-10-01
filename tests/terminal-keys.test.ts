@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { arrowSequence, draftSubmission } from '../src/client/terminalKeys.ts';
+import { arrowSequence } from '../src/client/terminalKeys.ts';
+import { draftSubmission } from '../src/shared/terminalInput.ts';
 
 test('方向按钮遵循终端普通模式与应用光标模式', () => {
   for (const [direction, suffix] of [['up', 'A'], ['down', 'B'], ['left', 'D'], ['right', 'C']] as const) {

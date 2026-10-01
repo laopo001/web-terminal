@@ -8,7 +8,8 @@ export function sessionLabel(session: SessionInfo) {
   let title = session.title?.replace(/^[\u2800-\u28ff]\s*/, '').trim();
   if (title?.endsWith(` | ${folder}`)) title = title.slice(0, -folder.length - 3).trim();
   // Shell 的标题经常包含整条命令；仅采用已识别 CLI 主动提供的会话标题。
-  const name = agent && title && !title.toLowerCase().startsWith(command.toLowerCase())
+  const commandTitle = /^(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)*(?:exec\s+)?(?:\S*\/)?(?:codex|claude)(?:\s|$)/i.test(title || '');
+  const name = agent && title && title !== folder && !commandTitle && !title.toLowerCase().startsWith(command.toLowerCase())
     ? title : command || session.name;
   return { name, folder, agent };
 }
