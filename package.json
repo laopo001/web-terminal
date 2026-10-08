@@ -49,7 +49,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@11.12.0",
+  "packageManager": "pnpm@11.28.2",
   "bin": {
     "web-terminal": "bin/web-terminal.mjs"
   },
