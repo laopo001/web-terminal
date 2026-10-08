@@ -25,17 +25,27 @@ export function preferScrollback(term: Terminal) {
   return { dispose() { element.removeEventListener('wheel', wheel, true); } };
 }
 
-/** 使用 xterm 内置的强制选择逻辑，让左键拖选优先于程序的鼠标报告。 */
+/** 应用鼠标模式交给 CLI 原生处理；Shift（Mac Option）保留 xterm 本地选择。 */
 export function preferTextSelection(term: Terminal) {
   const element = term.element!;
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   const previous = term.options.macOptionClickForcesSelection;
   if (mac) term.options.macOptionClickForcesSelection = true;
-  const select = (event: MouseEvent) => {
+  const selectHistory = (event: MouseEvent) => {
     if ((event.target as Element).closest('.scrollbar')) return;
-    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || term.modes.mouseTrackingMode === 'none') return;
-    Object.defineProperty(event, mac ? 'altKey' : 'shiftKey', { value: true });
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || term.modes.mouseTrackingMode === 'none') return;
+    // 本地历史没有对应的远端位置，点击和拖选只作用于本地。
+    if (term.buffer.active.viewportY < term.buffer.active.baseY) Object.defineProperty(event, mac ? 'altKey' : 'shiftKey', { value: true });
   };
-  element.addEventListener('mousedown', select, true);
-  return { dispose() { element.removeEventListener('mousedown', select, true); if (mac) term.options.macOptionClickForcesSelection = previous; } };
+  const preserveSelection = (event: MouseEvent) => {
+    // ANY 悬停报告会被当作输入，既会清空本地选区，也会把本地历史滚回底部。
+    if (!event.buttons && (term.hasSelection() || term.buffer.active.viewportY < term.buffer.active.baseY)) event.stopImmediatePropagation();
+  };
+  element.addEventListener('mousedown', selectHistory, true);
+  element.addEventListener('mousemove', preserveSelection, true);
+  return { dispose() {
+    element.removeEventListener('mousedown', selectHistory, true);
+    element.removeEventListener('mousemove', preserveSelection, true);
+    if (mac) term.options.macOptionClickForcesSelection = previous;
+  } };
 }

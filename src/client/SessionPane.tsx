@@ -11,6 +11,7 @@ import { enableTouchScroll } from './terminalTouch';
 import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection } from './terminalInteraction';
 import { suppressTerminalResponses } from './terminalResponses';
 import { UploadThumbnail } from './UploadThumbnail';
+import { enableTerminalClipboard } from './terminalClipboard';
 
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
@@ -99,8 +100,14 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
     const lineBases = new Map<number, string>();
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
+    let liveOutput = false;
     const term = new Terminal({ cursorBlink: true, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
     const responses = suppressTerminalResponses(term);
+    const clipboard = enableTerminalClipboard(term, {
+      canWrite: () => !disposed && liveOutput && activeRef.current && !document.hidden && document.hasFocus(),
+      writeText: text => navigator.clipboard.writeText(text),
+      onError: error => setNotice(`终端复制失败：${errorText(error)}`),
+    });
     const fit = new FitAddon(); term.loadAddon(fit); term.open(terminalHost.current); termRef.current = term;
     const selection = preferTextSelection(term);
     const scrolling = preferScrollback(term);
@@ -179,7 +186,8 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
             cwdRef.current = msg.session.cwd; setSessions(list => list.map(s => s.id === sessionId ? msg.session : s)); resize();
           } else if (msg.type === 'output') {
             const start = term.buffer.active.baseY + term.buffer.active.cursorY, base = cwdRef.current;
-            await write(msg.data);
+            liveOutput = true;
+            try { await write(msg.data); } finally { liveOutput = false; }
             if (disposed) return;
             const end = term.buffer.active.baseY + term.buffer.active.cursorY;
             for (let row = start; row <= end; row++) lineBases.set(row, base);
@@ -202,7 +210,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
       });
     };
     connect();
-    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); selection.dispose(); scrolling.dispose(); touchScroll.dispose(); geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
+    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); selection.dispose(); scrolling.dispose(); touchScroll.dispose(); geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
   }, [sessionId, token, inspect, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable]);
 
   useEffect(() => {
