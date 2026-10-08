@@ -16,6 +16,11 @@ export function useInputFocusPolicy() {
       const target = event.target instanceof Element ? event.target : null;
       if (isEditingField(target?.closest('input,textarea,[contenteditable]') ?? null)) return;
       const active = document.activeElement;
+      const button = target?.closest('button');
+      // 抬手产生 click 后再结束编辑，避免键盘提前收起改变按钮位置。
+      if (event.type === 'pointerdown' && button && !button.disabled && isEditingField(active)) {
+        event.preventDefault(); return;
+      }
       if (active?.matches('.xterm-helper-textarea') && target?.closest('.xterm')?.contains(active)) return;
       if (isEditingField(active)) active.blur();
     };

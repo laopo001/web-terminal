@@ -264,11 +264,13 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     });
   };
   const sendKey = (data: string): boolean => { if (!activeRef.current) return false; if (socket.current?.readyState !== WebSocket.OPEN || !readyRef.current) { setNotice('连接未就绪，输入未发送'); return false; } claimRef.current(); socket.current.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage)); return true; };
-  const sendDraft = async () => {
-    if (!activeRef.current || sendingRef.current || composing.current || Date.now() - compositionEnded.current < 80) return;
+  const sendDraft = async (explicit = false) => {
+    if (!activeRef.current || sendingRef.current) return;
+    if (!explicit && (composing.current || Date.now() - compositionEnded.current < 80)) return;
     const id = sessionId;
-    if (!id || !draft.trim()) return;
-    const text = draft;
+    // 按钮点击已结束编辑，从 DOM 读取输入法刚提交的文字，避免使用上一帧草稿。
+    const text = explicit ? draftInput.current?.innerText ?? draft : draft;
+    if (!id || !text.trim()) return;
     const sentUploadId = uploadId.current;
     sendingRef.current = true; setSending(true);
     try {
@@ -308,7 +310,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             <button className="copy-mode-toggle" title={copyMode ? '退出复制模式，恢复手指滚屏' : '进入复制模式，手指拖动选字'} aria-label="复制模式" aria-pressed={copyMode} onClick={() => setCopyMode(value => !value)}>{copyMode ? '退出复制' : '复制'}</button>
           </div>
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
-          <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft()} disabled={!draft.trim() || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
+          <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft(true)} disabled={!draft.trim() || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
         </div>
       </div></div></div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadFile(file); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
 }
