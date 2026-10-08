@@ -15,7 +15,7 @@ import { UploadThumbnail } from './UploadThumbnail';
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 type Props = {
-  session: SessionInfo; token: string; active: boolean; maxUploadBytes: number;
+  session: SessionInfo; token: string; active: boolean; fontFamily: string; maxUploadBytes: number;
   onNotice: (text: string) => void; onUnauthorized: () => void;
   onStatus: (id: string, status: string) => void;
   setSessions: React.Dispatch<React.SetStateAction<SessionInfo[]>>;
@@ -23,9 +23,11 @@ type Props = {
 };
 
 /** 首次选中后保留；隐藏只停止交互与尺寸上报，连接和画面继续更新。 */
-export function SessionPane({ session, token, active, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout, onStatus, setSessions, setReachable }: Props) {
+export function SessionPane({ session, token, active, fontFamily, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout, onStatus, setSessions, setReachable }: Props) {
   const sessionId = session.id;
   const activeRef = useRef(active);
+  const fontRef = useRef(fontFamily);
+  useLayoutEffect(() => { fontRef.current = fontFamily; }, [fontFamily]);
   const mounted = useRef(true);
   useLayoutEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -97,7 +99,7 @@ export function SessionPane({ session, token, active, maxUploadBytes, onNotice: 
     const lineBases = new Map<number, string>();
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
-    const term = new Terminal({ cursorBlink: true, fontFamily: 'Cascadia Code, JetBrains Mono, Consolas, monospace', fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
+    const term = new Terminal({ cursorBlink: true, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
     const responses = suppressTerminalResponses(term);
     const fit = new FitAddon(); term.loadAddon(fit); term.open(terminalHost.current); termRef.current = term;
     const selection = preferTextSelection(term);
@@ -203,6 +205,15 @@ export function SessionPane({ session, token, active, maxUploadBytes, onNotice: 
     return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); selection.dispose(); scrolling.dispose(); touchScroll.dispose(); geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
   }, [sessionId, token, inspect, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable]);
 
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    term.options.fontFamily = fontFamily;
+    let cancelled = false;
+    void document.fonts.ready.then(() => { if (!cancelled && activeRef.current) activateRef.current(); });
+    return () => { cancelled = true; };
+  }, [fontFamily]);
+
   const uploadFile = (file: File) => {
     const id = sessionId, key = token;
     if (!mounted.current) return;
@@ -255,7 +266,7 @@ export function SessionPane({ session, token, active, maxUploadBytes, onNotice: 
 
   return <div className="content session-pane" hidden={!active} data-session-id={sessionId}><div className="terminal-pane"><div className="terminal-wrap" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}><div ref={terminalHost} className="terminal-host" /></div><div className="composer-dock"><div className="composer-panel" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}>
         {uploads.length > 0 && <div className="composer-uploads" aria-label="图片上传状态">{uploads.map(item => <div key={item.id} className={`upload-state ${item.failed ? 'error' : ''}`}><UploadThumbnail file={item.file} /><span>{item.file.name} · {item.state}</span>{item.failed && <button onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}<button aria-label={`移除 ${item.file.name}`} onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); }}>×</button></div>)}</div>}
-        <div className="draft-row"><DraftInput ref={draftInput} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={setDraft} onKeyDown={e => {
+        <div className="draft-row"><DraftInput ref={draftInput} style={{ fontFamily }} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={setDraft} onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); }
         }} placeholder="输入命令或描述…" /></div>
         <div className="mobile-keys" onPointerDown={e => { if ((e.target as HTMLElement).closest('button')) e.preventDefault(); }} role="toolbar" aria-label="触屏终端快捷键"><button disabled={status !== '已连接'} onClick={() => sendKey('\t')}>Tab</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}</div>

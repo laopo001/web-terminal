@@ -29,3 +29,4 @@
 .composer-panel .mobile-keys{padding:0;border:0}
 @container(max-width:480px){.composer-hint{display:none}}
 @media(hover:none) and (pointer:coarse){.composer-dock{height:calc(160px + env(safe-area-inset-bottom,0px))}.composer-panel{left:6px;right:6px}.composer-panel .draft-input{font-size:16px}.composer-tools button{height:36px;min-width:36px}.composer-send{height:36px}.composer-panel .mobile-keys{gap:4px}.composer-panel .mobile-keys button{min-height:36px}}
+.font-settings{width:min(92vw,480px)}.font-settings label{display:block;margin:14px 0 8px;font-size:13px}.font-settings input{width:100%}.font-preview{padding:12px;border:1px solid #304953;border-radius:8px;overflow-wrap:anywhere}
