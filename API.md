@@ -1,6 +1,6 @@
 # 前后端接口
 
-HTTP 请求使用 `Authorization: Bearer <token>`。GET /api/auth 验证 token 返回 `{ok:true}`，无效 401。验证成功才将 token 写入 localStorage (`web-terminal.token`)。除静态页面外所有 API 均鉴权。错误统一 `{error:string}`。
+HTTP 请求使用 `Authorization: Bearer <token>`。GET /api/auth 验证 token 返回 `{ok:true}`，无效 401。验证成功才将 token 写入 localStorage (`web-terminal.token`)。`/api/*` 均鉴权。`GET /health` 无需 token，仅返回服务标识 `@dadigua/web-terminal`、版本、管理协议版本、实例 ID、PID 和是否由 CLI 管理；不返回 token、路径或配置。客户端检查该身份后才连接或启动服务。错误统一 `{error:string}`。
 
 - GET /api/info → ServerInfo
 - GET /api/sessions → SessionInfo[]

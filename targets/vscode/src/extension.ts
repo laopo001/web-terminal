@@ -3,12 +3,44 @@ import { defaultServerUrl, normalizeServerUrl, vscodeEmbedUrl } from '../../../s
 import { forwardedEmbedUrl } from './html.js';
 import { workspacePath } from './workspace.js';
 import { WebviewContent } from './content.js';
+import { ensureService, ServiceNotInstalledError, type ServiceRuntime } from '../../../src/service/client.js';
 
 const viewType = 'webTerminal.panel';
 let panel: vscode.WebviewPanel | undefined;
 let panelContent: WebviewContent | undefined;
 let sidebarContent: WebviewContent | undefined;
 const sidebarId = 'webTerminal.sidebar';
+let restarting = false;
+
+function serviceSettings() {
+  const config = vscode.workspace.getConfiguration('webTerminal');
+  return {
+    url: normalizeServerUrl(config.get<string>('serverUrl', defaultServerUrl)),
+    options: { runtime: config.get<ServiceRuntime>('runtime', 'auto'), cliPath: config.get<string>('cliPath', ''), allowStart: vscode.workspace.isTrusted },
+  };
+}
+
+async function reportServiceError(error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof ServiceNotInstalledError) {
+    if (await vscode.window.showErrorMessage(message, '复制安装命令') === '复制安装命令') await vscode.env.clipboard.writeText(error.installCommand);
+  } else void vscode.window.showErrorMessage(`Web Terminal：${message}`);
+}
+
+async function restartServer(): Promise<void> {
+  if (restarting) return;
+  restarting = true;
+  try {
+    const { url, options } = serviceSettings();
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Web Terminal：正在重启后台服务…' }, async () => {
+      await ensureService(url, options, 'restart');
+      await refresh(true);
+    });
+    void vscode.window.showInformationMessage('Web Terminal：后台服务已就绪，页面已重新加载。');
+  } catch (error) {
+    await reportServiceError(error);
+  } finally { restarting = false; }
+}
 
 function workspaceFolders() {
   return (vscode.workspace.workspaceFolders || []).flatMap(folder => {
@@ -18,8 +50,9 @@ function workspaceFolders() {
 }
 
 async function externalUrl(): Promise<string> {
-  const configured = vscode.workspace.getConfiguration('webTerminal').get<string>('serverUrl', defaultServerUrl);
-  const embedded = new URL(vscodeEmbedUrl(normalizeServerUrl(configured)));
+  const { url, options } = serviceSettings();
+  try { await ensureService(url, options); } catch (error) { await reportServiceError(error); throw error; }
+  const embedded = new URL(vscodeEmbedUrl(url));
   const external = await vscode.env.asExternalUri(vscode.Uri.from({
     scheme: embedded.protocol.slice(0, -1), authority: embedded.host, path: embedded.pathname,
     query: embedded.search.slice(1),
@@ -70,6 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('webTerminal.showSidebar', () => vscode.commands.executeCommand(`${sidebarId}.focus`)),
     vscode.commands.registerCommand('webTerminal.open', open),
+    vscode.commands.registerCommand('webTerminal.restartServer', restartServer),
     vscode.commands.registerCommand('webTerminal.reload', () => {
       if (!panelContent && !sidebarContent) { void vscode.commands.executeCommand(`${sidebarId}.focus`); return; }
       void refresh(true);
@@ -92,7 +126,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => { panelContent?.updateFolders(); sidebarContent?.updateFolders(); }),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('webTerminal.serverUrl')) void refresh();
+      if (['webTerminal.serverUrl', 'webTerminal.runtime', 'webTerminal.cliPath'].some(key => event.affectsConfiguration(key))) void refresh();
     }),
   );
 }

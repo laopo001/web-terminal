@@ -10,10 +10,14 @@ import { Files, HttpError } from './files.ts';
 import { Sessions, send } from './sessions.ts';
 import type { Config } from './config.ts';
 import { embeddingHeaders } from './embedding.ts';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { serviceName, serviceProtocol, serviceVersion } from '../shared/service.ts';
 
-export async function createApp(config: Config, options: { dev?: boolean; staticFiles?: boolean } = {}) {
+export async function createApp(config: Config, options: { dev?: boolean; staticFiles?: boolean; staticDir?: string; instanceId?: string; managed?: boolean } = {}) {
   mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   const app = express();
+  const instanceId = randomUUID();
   app.disable('x-powered-by');
   const server = createServer(app);
   const files = new Files(config);
@@ -28,6 +32,10 @@ export async function createApp(config: Config, options: { dev?: boolean; static
     res.set(embeddingHeaders(req.path, req.query.embed, !!options.dev));
     next();
   });
+  app.get('/health', (_req, res) => res.set('Cache-Control', 'no-store').json({
+    service: serviceName, version: serviceVersion, protocol: serviceProtocol,
+    instanceId: options.instanceId ?? instanceId, pid: process.pid, managed: options.managed ?? false,
+  }));
   app.use('/api', authenticate(config.token), express.json({ limit: '32kb' }));
   app.get('/api/auth', (_req, res) => res.json({ ok: true }));
   app.get('/api/info', (_req, res) => res.json({ machineId: config.machineId, defaultCwd: config.defaultCwd, roots: config.roots, maxUploadBytes: config.maxUploadBytes }));
@@ -116,8 +124,9 @@ export async function createApp(config: Config, options: { dev?: boolean; static
     const vite = await createVite({ server: { middlewareMode: true, hmr: { server } }, appType: 'spa' });
     closeVite = () => vite.close(); app.use(vite.middlewares);
   } else if (options.staticFiles !== false) {
-    app.use(express.static(resolve('dist')));
-    app.get('/{*path}', (_req, res) => res.sendFile(resolve('dist/index.html')));
+    const staticDir = options.staticDir || fileURLToPath(new URL('../../dist/', import.meta.url));
+    app.use(express.static(staticDir));
+    app.get('/{*path}', (_req, res) => res.sendFile(resolve(staticDir, 'index.html')));
   }
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     if (res.headersSent) { res.destroy(); return; }

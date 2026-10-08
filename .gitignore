@@ -5,4 +5,5 @@ dist/
 config.yaml
 *.log
 dist-clients/
+dist-server/
 release/

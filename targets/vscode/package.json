@@ -1,7 +1,7 @@
 {
   "name": "web-terminal",
   "displayName": "Web Terminal",
-  "description": "Open an existing Web Terminal server in VS Code.",
+  "description": "Connect to and manage a Web Terminal Node.js service in VS Code.",
   "publisher": "dadigua",
   "version": "0.1.2",
   "main": "./extension.cjs",
@@ -14,6 +14,7 @@
       { "command": "webTerminal.showSidebar", "title": "Show Sidebar", "category": "Web Terminal" },
       { "command": "webTerminal.open", "title": "Open", "category": "Web Terminal", "icon": "$(open-preview)" },
       { "command": "webTerminal.reload", "title": "Reload", "category": "Web Terminal", "icon": "$(refresh)" },
+      { "command": "webTerminal.restartServer", "title": "重启后台服务（将结束普通 Shell 会话）", "category": "Web Terminal", "icon": "$(debug-restart)" },
       { "command": "webTerminal.setServerUrl", "title": "Set Server URL", "category": "Web Terminal", "icon": "$(settings-gear)" }
     ],
     "viewsContainers": {
@@ -23,20 +24,41 @@
       "webTerminal": [{ "id": "webTerminal.sidebar", "name": "Web Terminal", "type": "webview" }]
     },
     "menus": {
+      "editor/title": [
+        { "command": "webTerminal.restartServer", "when": "activeWebviewPanelId == webTerminal.panel", "group": "navigation@1" }
+      ],
       "view/title": [
         { "command": "webTerminal.open", "when": "view == webTerminal.sidebar", "group": "navigation@1" },
         { "command": "webTerminal.reload", "when": "view == webTerminal.sidebar", "group": "navigation@2" },
-        { "command": "webTerminal.setServerUrl", "when": "view == webTerminal.sidebar", "group": "navigation@3" }
+        { "command": "webTerminal.restartServer", "when": "view == webTerminal.sidebar", "group": "navigation@3" },
+        { "command": "webTerminal.setServerUrl", "when": "view == webTerminal.sidebar", "group": "navigation@4" }
       ]
     },
     "configuration": {
       "title": "Web Terminal",
       "properties": {
+        "webTerminal.runtime": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "native",
+            "wsl"
+          ],
+          "default": "auto",
+          "scope": "machine",
+          "description": "本机服务运行环境。auto 在 Windows 优先检测本机 CLI，再检测默认 WSL；Remote WSL/SSH 中使用扩展宿主所在机器。"
+        },
+        "webTerminal.cliPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "可选的本机 web-terminal CLI 绝对路径；留空时自动查找全局安装。"
+        },
         "webTerminal.serverUrl": {
           "type": "string",
           "default": "http://localhost:3840",
           "scope": "machine",
-          "description": "HTTP(S) root URL of an independently running Web Terminal server."
+          "description": "Web Terminal 服务根地址。本机 HTTP 地址自动检测并启动全局安装的 CLI；远程地址只连接。"
         }
       }
     }

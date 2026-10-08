@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, shell, clipboard } from 'electron';
 import { join, resolve } from 'node:path';
-import { readServerUrl, sameServer } from './settings.ts';
+import { readClientSettings, sameServer } from './settings.ts';
+import { ensureService, ServiceNotInstalledError } from '../../../src/service/client.ts';
 
 app.setName('Web Terminal');
 if (process.env.WEB_TERMINAL_CLIENT_DATA_DIR) app.setPath('userData', resolve(process.env.WEB_TERMINAL_CLIENT_DATA_DIR));
@@ -8,20 +9,25 @@ let window: BrowserWindow | null = null;
 let target = '';
 let loading = false;
 
-async function loadServer() {
+async function loadServer(action: 'start' | 'restart' = 'start') {
   if (!window || loading) return;
   loading = true;
   try {
-    target = readServerUrl(app.getPath('userData'), process.env.WEB_TERMINAL_URL);
-    await window.loadURL(target);
+    const settings = readClientSettings(app.getPath('userData'), process.env.WEB_TERMINAL_URL);
+    target = settings.serverUrl;
+    await ensureService(target, settings, action);
+    if (window && !window.isDestroyed()) await window.loadURL(target);
   } catch (error) {
+    if (!window || window.isDestroyed()) return;
+    const missing = error instanceof ServiceNotInstalledError;
     const answer = await dialog.showMessageBox(window, {
       type: 'error', title: '无法连接 Web Terminal',
-      message: '请确认服务器已启动，且客户端地址正确。',
+      message: missing ? '请安装 Web Terminal 后重试。' : '服务检测或启动失败。',
       detail: `${target || ''}\n${error instanceof Error ? error.message : String(error)}`,
-      buttons: ['打开连接配置', '关闭提示'], defaultId: 0, cancelId: 1,
+      buttons: missing ? ['复制安装命令', '打开连接配置', '关闭提示'] : ['打开连接配置', '关闭提示'], defaultId: 0, cancelId: missing ? 2 : 1,
     });
-    if (answer.response === 0) await shell.openPath(join(app.getPath('userData'), 'client.yaml'));
+    if (missing && answer.response === 0) clipboard.writeText(error.installCommand);
+    else if (answer.response === (missing ? 1 : 0)) await shell.openPath(join(app.getPath('userData'), 'client.yaml'));
   } finally { loading = false; }
 }
 
@@ -50,6 +56,7 @@ function createWindow() {
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
     { label: '连接', submenu: [
       { label: '重新加载服务器', accelerator: process.platform === 'darwin' ? 'Cmd+R' : 'Ctrl+Shift+R', click: () => { void loadServer(); } },
+      { id: 'restart-server', label: '重启后台服务（将结束普通 Shell 会话）', click: () => { void loadServer('restart'); } },
       { label: '打开连接配置', click: () => { void shell.openPath(join(app.getPath('userData'), 'client.yaml')); } },
       { type: 'separator' }, { role: 'quit', label: '退出' },
     ] },
@@ -60,7 +67,7 @@ function createWindow() {
     ] },
     { label: '视图', submenu: [{ role: 'resetZoom', label: '实际大小' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' }, { role: 'togglefullscreen', label: '全屏' }, { role: 'toggleDevTools', label: '开发者工具' }] },
   ]));
-  // 窗口只载入已运行的 Web 服务，不启动或连接任何本机终端进程。
+  // 先验证服务身份；本机服务缺失时通过全局 CLI 启动。
   void loadServer();
   window.show();
 }

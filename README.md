@@ -22,6 +22,25 @@ cat .data/token
 
 开发模式使用 `pnpm dev`，前后端共用 3840 端口。`pnpm test` 验证文件访问、认证、真实 PTY 和断线重连；`pnpm check` 做类型检查。
 
+## 全局 CLI 与本地 link
+
+服务包名为 `@dadigua/web-terminal`，命令名为 `web-terminal`。npm 上的无 scope 同名包是其他项目，不要安装它。本项目尚未发布；本地开发先执行：
+
+```bash
+pnpm build
+npm link
+web-terminal start
+web-terminal status
+web-terminal restart
+web-terminal stop
+```
+
+link 指向当前项目；服务端或前端源码修改后执行 `pnpm build`，再重启服务。发布后的安装命令为 `npm install -g @dadigua/web-terminal`。
+
+CLI 默认使用 `~/.web-terminal/config.yaml`，相对路径以配置文件所在目录为准；每个端口的 token、状态和日志分别位于 `~/.web-terminal/servers/<端口>/data/token`、`server.yaml` 和 `server.log`。首次登录读取对应 token 文件。可用 `--url http://localhost:3841` 选择端口、`--config /path/config.yaml` 指定配置，`--home /path/state` 指定管理目录。CLI 启动为后台进程，关闭客户端不会结束服务；重启保留 token，但结束普通 Shell 会话。
+
+CLI 只停止自己登记且启动标识匹配的进程，不接管 `pnpm start` 或 systemd 启动的外部服务。外部服务可以连接，重启时会提示使用原管理器。
+
 ## 使用
 
 1. 首次打开时选择已有会话，或点击“新建 Shell”进入普通命令行；不会自动接入第一条历史会话。通过“＋”选择工作目录；VS Code 中可快捷选择工作区目录。
@@ -58,7 +77,7 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 
 ## VS Code 与 Electron
 
-两个客户端仅加载已有 Web 页面，不启动后端，不打包前端副本或终端运行时。服务器仍按上面的步骤独立启动。地址变更后重载客户端即可。
+两个客户端加载独立的 Node.js 服务，共用端口检测、身份检查和 CLI 启动逻辑；不打包前端副本或终端运行时。本机端口未启动时自动调用全局 CLI，冲突或缺少安装会明确报错；远程地址只连接。
 
 ### VS Code
 
@@ -66,7 +85,7 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 pnpm package:vscode
 ```
 
-在 VS Code 的扩展菜单选择“从 VSIX 安装”，打开 `release/web-terminal.vsix`。点击活动栏终端图标或运行 `Web Terminal: Show Sidebar` 打开侧边窗口；`Web Terminal: Open` 在编辑器标签页打开。两处均加载现有 Web 页面。默认地址为 `http://localhost:3840`；通过 `Web Terminal: Set Server URL` 或设置 `webTerminal.serverUrl` 修改，`Web Terminal: Reload` 重载。Remote WSL/SSH 使用 VS Code 的端口转发能力。
+在 VS Code 的扩展菜单选择“从 VSIX 安装”，打开 `release/web-terminal.vsix`。点击活动栏终端图标或运行 `Web Terminal: Show Sidebar` 打开侧边窗口；`Web Terminal: Open` 在编辑器标签页打开。两处均加载现有 Web 页面。默认地址为 `http://localhost:3840`；通过 `Web Terminal: Set Server URL` 或设置 `webTerminal.serverUrl` 修改，`Web Terminal: Reload` 重载；侧栏及编辑器标题栏的重启按钮重启后台并等待就绪。Remote WSL/SSH 在扩展宿主所在机器检测和启动，再使用 VS Code 的端口转发能力。Windows 本机默认先查本机全局 CLI，再查默认 WSL；可通过 `webTerminal.runtime` 和 `webTerminal.cliPath` 调整。
 
 ### Electron
 
@@ -75,7 +94,7 @@ pnpm electron
 pnpm package:electron:win
 ```
 
-开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.0-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
+开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.0-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
 
 浏览器、VS Code、Electron 各自首次在同一 Web 登录页输入 token，验证后保存在各自 Webview 的持久 localStorage 中。客户端配置不保存 token。Electron 远程页面开启 sandbox/contextIsolation、关闭 Node 集成；VS Code 通过专用 `/?embed=vscode` 入口加载，普通入口仍禁止 iframe 嵌入。
 

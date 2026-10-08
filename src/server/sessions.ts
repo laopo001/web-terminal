@@ -93,7 +93,9 @@ export class Sessions {
   }
   private ensureProcess(session: Session) {
     if (session.process || !session.info.running) return;
-    const terminalProcess = this.spawnTerminal(this.config.shell, ['-l'], session.info.cwd, 100, 30);
+    const shellArgs = /(?:^|[/\\])(?:powershell|pwsh)(?:\.exe)?$/i.test(this.config.shell) ? ['-NoLogo']
+      : /(?:^|[/\\])cmd(?:\.exe)?$/i.test(this.config.shell) ? ['/Q'] : ['-l'];
+    const terminalProcess = this.spawnTerminal(this.config.shell, shellArgs, session.info.cwd, 100, 30);
     session.process = terminalProcess;
     terminalProcess.onData(data => {
       session.pendingBytes += data.length;

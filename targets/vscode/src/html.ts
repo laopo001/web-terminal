@@ -41,5 +41,5 @@ frame.addEventListener('load', publish);
 }
 
 export function errorHtml(message: string, nonce = randomBytes(16).toString('base64')): string {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><style nonce="${nonce}">body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:20px}code{font-family:var(--vscode-editor-font-family)}</style></head><body><h2>无法打开 Web Terminal</h2><p>${escapeHtml(message)}</p><p>请独立启动 Web Terminal 服务，然后运行命令 <code>Web Terminal: Reload</code>。地址可用 <code>Web Terminal: Set Server URL</code> 设置。</p>${restoreStateScript(nonce)}</body></html>`;
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><style nonce="${nonce}">body{font:13px var(--vscode-font-family);color:var(--vscode-foreground);padding:20px}code{font-family:var(--vscode-editor-font-family)}</style></head><body><h2>无法打开 Web Terminal</h2><p>${escapeHtml(message)}</p><p>处理上述问题后运行 <code>Web Terminal: Reload</code> 重试。地址可用 <code>Web Terminal: Set Server URL</code> 设置。</p>${restoreStateScript(nonce)}</body></html>`;
 }

@@ -1,11 +1,10 @@
 {
-  "name": "web-terminal",
+  "name": "@dadigua/web-terminal",
   "version": "0.1.2",
-  "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx src/server/index.ts --dev",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && tsx scripts/build-server.ts",
     "start": "tsx src/server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "check": "tsc --noEmit",
@@ -13,7 +12,8 @@
     "package:vscode": "pnpm build:clients && tsx scripts/package-vscode.ts",
     "electron": "pnpm build:clients && electron dist-clients/electron",
     "package:electron:win": "pnpm build:clients && tsx scripts/package-electron.ts --win",
-    "package:electron:linux": "pnpm build:clients && tsx scripts/package-electron.ts --linux"
+    "package:electron:linux": "pnpm build:clients && tsx scripts/package-electron.ts --linux",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
@@ -46,6 +46,19 @@
     "typescript": "^5.9.3",
     "vite": "^7.2.0"
   },
-  "engines": { "node": ">=22" },
-  "packageManager": "pnpm@11.12.0"
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.12.0",
+  "bin": {
+    "web-terminal": "bin/web-terminal.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist-server/",
+    "dist/",
+    "config.example.yaml",
+    "README.md",
+    "API.md"
+  ]
 }

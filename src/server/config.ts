@@ -8,12 +8,12 @@ export interface Config {
   host: string; port: number; dataDir: string; token: string; roots: string[];
   defaultCwd: string; shell: string; machineId: string; maxUploadBytes: number;
 }
-export function loadConfig(): Config {
-  const configFile = resolve(process.env.WEB_TERMINAL_CONFIG || 'config.yaml');
+export function loadConfig(defaults: { configFile?: string; dataDir?: string } = {}): Config {
+  const configFile = resolve(process.env.WEB_TERMINAL_CONFIG || defaults.configFile || 'config.yaml');
   const raw = existsSync(configFile) ? parse(readFileSync(configFile, 'utf8')) : {};
   if (raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) throw new Error('config.yaml 必须是配置对象');
   const input = raw || {};
-  const dataDir = resolve(process.env.WEB_TERMINAL_DATA_DIR || input.dataDir || '.data');
+  const dataDir = resolve(process.env.WEB_TERMINAL_DATA_DIR || input.dataDir || defaults.dataDir || '.data');
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const tokenFile = resolve(dataDir, 'token');
   let token = process.env.WEB_TERMINAL_TOKEN?.trim();
@@ -31,7 +31,7 @@ export function loadConfig(): Config {
     host: String(process.env.HOST || input.host || '127.0.0.1'), port, dataDir, token,
     roots: roots.map(r => realpathSync(resolve(r))),
     defaultCwd: realpathSync(resolve(input.defaultCwd || homedir())),
-    shell: String(input.shell || process.env.SHELL || '/bin/bash'),
+    shell: String(input.shell || process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash')),
     machineId: `${hostname()}-${createHash('sha256').update(dataDir).digest('hex').slice(0, 8)}`,
     maxUploadBytes: 20 * 1024 * 1024,
   };
