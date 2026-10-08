@@ -38,7 +38,7 @@ export async function createApp(config: Config, options: { dev?: boolean; static
   }));
   app.use('/api', authenticate(config.token), express.json({ limit: '32kb' }));
   app.get('/api/auth', (_req, res) => res.json({ ok: true }));
-  app.get('/api/info', (_req, res) => res.json({ machineId: config.machineId, defaultCwd: config.defaultCwd, roots: config.roots, maxUploadBytes: config.maxUploadBytes }));
+  app.get('/api/info', (_req, res) => res.json({ machineId: config.machineId, defaultCwd: config.defaultCwd, maxUploadBytes: config.maxUploadBytes }));
   app.get('/api/directories', async (req, res) => {
     if (req.query.path !== undefined && (typeof req.query.path !== 'string' || req.query.path.length > 8192 || req.query.path.includes('\0'))) throw new HttpError(400, '路径参数无效');
     res.json(await files.directories(typeof req.query.path === 'string' && req.query.path ? req.query.path : config.defaultCwd));
@@ -56,7 +56,7 @@ export async function createApp(config: Config, options: { dev?: boolean; static
     if (req.params.action !== 'meta' && req.params.action !== 'content') throw new HttpError(404, '接口不存在');
     const session = await sessions.current(req.params.id);
     if (typeof req.query.path !== 'string' || (req.query.base !== undefined && typeof req.query.base !== 'string')) throw new HttpError(400, '路径参数无效');
-    const result = await files.read(session.id, session.cwd, req.query.path, req.query.base as string | undefined);
+    const result = await files.read(session.cwd, req.query.path, req.query.base as string | undefined);
     if (req.params.action === 'meta') {
       await result.handle.close(); res.json(result.info); return;
     }

@@ -5,6 +5,10 @@ const pathExt = /\.[a-z0-9]{1,12}$/i;
 
 export function isImagePath(path: string): boolean { return imageExt.test(path.split(/[?#]/, 1)[0]); }
 
+export function isTextPath(path: string): boolean {
+  return /\.(?:txt|md|mdx|markdown|log|json|jsonl|ya?ml|toml|ini|conf|cfg|csv|tsv|tsx?|jsx?|mjs|cjs|html?|css|scss|less|py|sh|bash|zsh|ps1|sql|xml|rs|go|java|kt|c|h|cpp|hpp|cs|rb|php|vue|svelte)$/i.test(path);
+}
+
 /** Parse one terminal logical line. Caller may join adjacent wrapped rows. */
 export function findPaths(text: string): PathMatch[] {
   const matches: PathMatch[] = [];

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { defaultServerUrl, normalizeServerUrl, vscodeEmbedUrl } from '../../../src/shared/clientUrl.js';
 import { forwardedEmbedUrl } from './html.js';
-import { workspacePath } from './workspace.js';
+import { editorFilePath, workspacePath } from './workspace.js';
 import { WebviewContent } from './content.js';
 import { ensureService, ServiceNotInstalledError, type ServiceRuntime } from '../../../src/service/client.js';
 
@@ -75,12 +75,21 @@ async function refresh(force = false): Promise<void> {
   await Promise.all([panelContent?.update(force), sidebarContent?.update(force)]);
 }
 
+async function receiveMessage(content: WebviewContent, message: { type?: string; path?: unknown }): Promise<void> {
+  content.receive(message);
+  if (message?.type !== 'web-terminal:open-file' || typeof message.path !== 'string') return;
+  try {
+    const path = editorFilePath(message.path, process.platform, (vscode.workspace.workspaceFolders || []).map(folder => folder.uri));
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
+  } catch (error) { void vscode.window.showErrorMessage(`Web Terminal：打开文件失败：${error instanceof Error ? error.message : String(error)}`); }
+}
+
 function attach(current: vscode.WebviewPanel): void {
   panel = current;
   const content = new WebviewContent(current.webview, externalUrl, workspaceFolders);
   panelContent = content;
   current.onDidChangeViewState(() => { if (current.active) lastSurface = 'panel'; });
-  current.webview.onDidReceiveMessage(message => content.receive(message));
+  current.webview.onDidReceiveMessage(message => void receiveMessage(content, message));
   current.onDidDispose(() => {
     content.dispose();
     if (panel === current) { panel = undefined; panelContent = undefined; }
@@ -119,7 +128,7 @@ export function activate(context: vscode.ExtensionContext): void {
         const content = new WebviewContent(view.webview, externalUrl, workspaceFolders);
         sidebarContent?.dispose();
         sidebarContent = content;
-        view.webview.onDidReceiveMessage(message => content.receive(message));
+        view.webview.onDidReceiveMessage(message => void receiveMessage(content, message));
         view.onDidChangeVisibility(() => { if (view.visible) lastSurface = 'sidebar'; });
         view.onDidDispose(() => {
           content.dispose();

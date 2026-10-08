@@ -49,6 +49,12 @@ test('iframe queues text until a composer is ready and checks sender origin', as
   const window = { origin: 'vscode-webview://test-host', addEventListener: (_: string, fn: typeof receive) => { receive = fn; } };
   runInNewContext(source, { window, document: { querySelector: () => frame }, URL, acquireVsCodeApi: () => ({ setState() {}, postMessage: (message: unknown) => host.push(message) }) });
   assert.equal(host[0].type, 'web-terminal:bridge-ready');
+  const openFile = { type: 'web-terminal:open-file', path: '/home/me/file.ts' };
+  receive({ source: frame.contentWindow, origin: 'https://untrusted.example', data: openFile });
+  receive({ source: {}, origin: 'http://localhost:3840', data: openFile });
+  assert.equal(host.length, 1);
+  receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: openFile });
+  assert.deepEqual(JSON.parse(JSON.stringify(host[1])), openFile);
   const attachment = { id: '1', name: 'code.ts', text: 'example' };
   const outerFrame = {}; // VS Code 的外层 frame，与 window、null 均不同。
   receive({ source: outerFrame, origin: 'https://untrusted.example', data: { type: 'web-terminal:text-attachment', attachment: { ...attachment, id: 'forged' } } });

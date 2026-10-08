@@ -43,6 +43,7 @@ window.addEventListener('message', event => {
     if (event.data?.type === 'web-terminal:composer-ready') { composerReady = true; flush(); }
     else if (event.data?.type === 'web-terminal:composer-hidden') composerReady = false;
     else if (event.data?.type === 'web-terminal:attachment-received') pending.delete(event.data.id);
+    else if (event.data?.type === 'web-terminal:open-file' && typeof event.data.path === 'string') api.postMessage({ type: 'web-terminal:open-file', path: event.data.path });
   }
   else if (fromHost(event) && event.data?.type === 'web-terminal:workspace-folders' && Array.isArray(event.data.folders)) { folders = event.data.folders; publish(); }
   else if (fromHost(event) && event.data?.type === 'web-terminal:text-attachment') { const item = event.data.attachment; if (typeof item?.id === 'string' && typeof item?.name === 'string' && typeof item?.text === 'string') { pending.set(item.id, item); flush(); } }

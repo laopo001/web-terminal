@@ -13,7 +13,7 @@ import type { Config } from '../src/server/config.ts';
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'web-terminal-test-'));
   const workspace = join(root, 'workspace'); await mkdir(workspace);
-  const config: Config = { host: '127.0.0.1', port: 0, dataDir: join(root, 'data'), token: randomUUID(), roots: [workspace], defaultCwd: workspace, shell: '/bin/bash', machineId: randomUUID(), maxUploadBytes: 20 * 1024 * 1024 };
+  const config: Config = { host: '127.0.0.1', port: 0, dataDir: join(root, 'data'), token: randomUUID(), defaultCwd: workspace, shell: '/bin/bash', machineId: randomUUID(), maxUploadBytes: 20 * 1024 * 1024 };
   let runtime = await createApp(config, { staticFiles: false });
   async function listen() { runtime.server.listen(0, '127.0.0.1'); await once(runtime.server, 'listening'); }
   await listen();
@@ -44,7 +44,7 @@ async function connect(url: string, token: string, id: string, cols = 100, rows 
   };
 }
 
-test('认证、文件上传和真实内容预览，拒绝路径穿越与伪造图片', async () => {
+test('认证、文件上传和真实内容预览，支持上级目录与符号链接', async () => {
   const f = await fixture();
   try {
     assert.equal((await fetch(f.url() + '/api/sessions')).status, 401);
@@ -68,8 +68,9 @@ test('认证、文件上传和真实内容预览，拒绝路径穿越与伪造�
     assert.equal((await sharp(Buffer.from(await preview.arrayBuffer())).metadata()).width, 64);
     await writeFile(join(f.root, 'outside.txt'), 'outside');
     await symlink(join(f.root, 'outside.txt'), join(f.workspace, 'escape.txt'));
-    assert.equal((await f.api(endpoint + 'meta?path=escape.txt')).status, 403);
-    assert.equal((await f.api(endpoint + 'meta?path=../outside.txt')).status, 403);
+    assert.equal((await f.api(endpoint + 'meta?path=escape.txt')).status, 200);
+    assert.equal((await f.api(endpoint + 'meta?path=../outside.txt')).status, 200);
+    assert.equal(await (await f.api(endpoint + 'content?path=../outside.txt')).text(), 'outside');
     assert.equal((await f.api(endpoint + 'meta?path=missing.png')).status, 404);
     const forged = new FormData(); forged.append('file', new Blob(['not an image'], { type: 'image/png' }), 'bad.png');
     assert.equal((await f.api(`/api/sessions/${id}/uploads`, { method: 'POST', body: forged })).status, 415);
@@ -101,7 +102,7 @@ test('WebSocket token 校验，真实 PTY 输入，断线重连保留 Shell、�
   } finally { await f.close(); }
 });
 
-test('目录选择器只列出允许范围内的目录，拒绝越界和未认证访问', async () => {
+test('目录选择器支持上级目录、符号链接及在目录外创建会话', async () => {
   const f = await fixture();
   try {
     await mkdir(join(f.workspace, '子目录'));
@@ -110,12 +111,15 @@ test('目录选择器只列出允许范围内的目录，拒绝越界和未认�
     assert.equal((await fetch(f.url() + '/api/directories')).status, 401);
     const listing = await (await f.api('/api/directories')).json();
     assert.equal(listing.path, f.workspace);
-    assert.equal(listing.parent, null);
-    assert.deepEqual(listing.entries, [{ name: '子目录', path: join(f.workspace, '子目录') }]);
+    assert.equal(listing.parent, f.root);
+    assert.deepEqual(listing.entries, [{ name: 'outside', path: f.root }, { name: '子目录', path: join(f.workspace, '子目录') }].sort((a, b) => a.name.localeCompare(b.name)));
     const nested = await (await f.api('/api/directories?path=' + encodeURIComponent(join(f.workspace, '子目录')))).json();
     assert.equal(nested.parent, f.workspace);
-    assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(f.root))).status, 403);
-    assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(join(f.workspace, 'outside')))).status, 403);
+    assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(f.root))).status, 200);
+    assert.equal((await f.api('/api/directories?path=' + encodeURIComponent(join(f.workspace, 'outside')))).status, 200);
+    const created = await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: f.root }) });
+    assert.equal(created.status, 201);
+    assert.equal((await created.json()).cwd, f.root);
   } finally { await f.close(); }
 });
 

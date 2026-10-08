@@ -64,7 +64,7 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
   const home = join(root, 'home');
   await mkdir(home);
   const customConfig = join(root, 'custom.yaml');
-  await writeFile(customConfig, stringify({ defaultCwd: root, roots: [root], shell: '/bin/bash', dataDir: 'custom-data' }));
+  await writeFile(customConfig, stringify({ defaultCwd: root, shell: '/bin/bash', dataDir: 'custom-data' }));
   const url = await unusedUrl();
   const env: NodeJS.ProcessEnv = { ...process.env, WEB_TERMINAL_HOME: home };
   delete env.WEB_TERMINAL_CONFIG;

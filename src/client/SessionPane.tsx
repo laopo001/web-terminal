@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ClientMessage, FileInfo, ServerMessage, SessionInfo } from '../shared/protocol';
-import { isImagePath, quoteForShell } from './paths';
-import { api, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
+import { isImagePath, isTextPath, quoteForShell } from './paths';
+import { api, fileBlob, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
 import { pathLinkProvider } from './links';
 import { arrowSequence } from './terminalKeys';
 import { DraftInput } from './DraftInput';
+import { FilePreviewDialog } from './FilePreviewDialog';
+import type { FilePreview } from './api';
 import { enableTouchInteraction } from './terminalTouch';
 import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection } from './terminalInteraction';
 import { suppressTerminalResponses } from './terminalResponses';
@@ -44,7 +46,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   const setUploads = (update: (items: Attachment[]) => Attachment[]) => { uploadsRef.current = update(uploadsRef.current); renderUploads(uploadsRef.current); };
   const uploadId = useRef(0);
   const receivedAttachments = useRef(new Set<string>());
-  const [preview, setPreview] = useState<{ file: FileInfo; url: string | null; loading: boolean; error?: string } | null>(null);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
   const [hover, setHover] = useState<{ file: FileInfo; url: string | null; x: number; y: number; error?: string } | null>(null);
   const [draft, setDraft] = useState('');
   const [copyMode, setCopyMode] = useState(false);
@@ -85,6 +87,10 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     const id = sessionId, key = token;
     const generation = target === 'hover' ? hoverGeneration.current : ++previewGeneration.current;
     if (!mounted.current) return;
+    if (target === 'preview') {
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); previewUrl.current = null;
+      setPreview({ file: { path, name: path.split('/').pop() || path, size: 0, mime: '', isImage: isImagePath(path) }, url: null, loading: true });
+    }
     try {
       const file = await api<FileInfo>(key, urlFor(id, 'meta', path, base || undefined));
       if (!mounted.current || (target === 'hover' ? hoverGeneration.current : previewGeneration.current) !== generation) return;
@@ -95,15 +101,34 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
         if (hoverUrl.current) URL.revokeObjectURL(hoverUrl.current); hoverUrl.current = url;
         setHover({ file, url, ...point });
       } else {
-        if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); previewUrl.current = null; setPreview({ file, url: null, loading: file.mime.startsWith('image/') });
+        const textFile = isTextPath(file.path);
+        setPreview({ file, url: null, loading: file.isImage || textFile });
         if (file.mime.startsWith('image/')) {
           const url = await blobUrl(key, urlFor(id, 'content', file.path));
           if (!mounted.current || previewGeneration.current !== generation) { URL.revokeObjectURL(url); return; }
           previewUrl.current = url; setPreview({ file, url, loading: false });
+        } else if (textFile) {
+          if (file.size > 1024 * 1024) throw new Error('文本超过 1 MB，请下载查看');
+          const blob = await fileBlob(key, urlFor(id, 'content', file.path));
+          if (blob.size > 1024 * 1024) throw new Error('文本超过 1 MB，请下载查看');
+          const text = await blob.text();
+          if (!mounted.current || previewGeneration.current !== generation) return;
+          if (text.includes('\0')) throw new Error('该文件含二进制内容，请下载查看');
+          setPreview({ file, url: null, text, loading: false });
         }
       }
-    } catch (error) { if (!mounted.current) return; if (error instanceof UnauthorizedError) { logout(); return; } if (target === 'preview' && mounted.current && previewGeneration.current === generation) setPreview({ file: { path, name: path.split('/').pop() || path, size: 0, mime: '', isImage: isImagePath(path) }, url: null, loading: false, error: errorText(error) }); }
+    } catch (error) { if (!mounted.current) return; if (error instanceof UnauthorizedError) { logout(); return; } if (target === 'preview' && mounted.current && previewGeneration.current === generation) setPreview(value => value ? { ...value, loading: false, error: errorText(error) } : null); }
   }, [sessionId, token, logout, setNotice]);
+  const activatePath = useCallback(async (path: string, base: string) => {
+    revokeHover();
+    if (window.parent === window || new URLSearchParams(location.search).get('embed') !== 'vscode') { await inspect(path, base, 'preview'); return; }
+    if (!path.startsWith('/') && !path.startsWith('~/') && !base) { setNotice('历史相对路径的工作目录无法确定，请使用绝对路径'); return; }
+    try {
+      const file = await api<FileInfo>(token, urlFor(sessionId, 'meta', path, base || undefined));
+      if (mounted.current && activeRef.current) window.parent.postMessage({ type: 'web-terminal:open-file', path: file.path }, '*');
+    } catch (error) { handleApiError(error, '打开文件失败'); }
+  }, [sessionId, token, inspect, revokeHover, handleApiError, setNotice]);
+
   const download = async (file: FileInfo) => {
     if (!sessionId || !token) return;
     try { const url = await blobUrl(token, urlFor(sessionId, 'content', file.path, undefined, 'download')); const a = document.createElement('a'); a.href = url; a.download = file.name; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }
@@ -186,7 +211,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
       copyText,
     });
     cancelTouchRef.current = touch.cancel;
-    const provider = pathLinkProvider(term, { base: row => lineBases.get(row) ?? '', activate: (path, base) => { revokeHover(); void inspect(path, base, 'preview'); }, hover: (path, base, point) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); }, leave: revokeHover });
+    const provider = pathLinkProvider(term, { base: row => lineBases.get(row) ?? '', activate: (path, base) => { void activatePath(path, base); }, hover: (path, base, point) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); }, leave: revokeHover });
     const linkDisposable = term.registerLinkProvider(provider);
     const connect = () => {
       if (disposed) return;
@@ -247,7 +272,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     };
     connect();
     return () => { disposed = true; stopActivity(); if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); inputFocus.dispose(); updateInputFocusRef.current = () => {}; selection.dispose(); scrolling.dispose(); touch.dispose(); cancelTouchRef.current = () => {}; geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
-  }, [sessionId, token, inspect, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable, copyText, onActivity]);
+  }, [sessionId, token, inspect, activatePath, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable, copyText, onActivity]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -357,5 +382,5 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
           <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft(true)} disabled={(!draft.trim() && !uploads.length) || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
         </div>
-      </div></div></div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={e => { const files = [...(e.target.files || [])]; e.target.value = ''; files.forEach(uploadFile); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
+      </div></div></div>{preview && <FilePreviewDialog preview={preview} onClose={revokePreview} onCopy={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))} onDownload={() => void download(preview.file)} />}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={e => { const files = [...(e.target.files || [])]; e.target.value = ''; files.forEach(uploadFile); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
 }

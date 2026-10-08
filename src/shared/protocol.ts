@@ -10,7 +10,6 @@ export interface SessionInfo {
 export interface ServerInfo {
   machineId: string;
   defaultCwd: string;
-  roots: string[];
   maxUploadBytes: number;
 }
 export interface FileInfo {

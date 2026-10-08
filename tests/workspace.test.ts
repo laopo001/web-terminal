@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { workspacePath } from '../targets/vscode/src/workspace.ts';
+import { editorFilePath, workspacePath } from '../targets/vscode/src/workspace.ts';
 import { iframeHtml } from '../targets/vscode/src/html.ts';
 import { WebviewContent } from '../targets/vscode/src/content.ts';
 
@@ -36,4 +36,14 @@ test('工作区桥接校验 iframe 来源，传递全部目录并阻止 HTML 注
   await content.update(); current = []; content.updateFolders();
   assert.deepEqual(updates, [{ type: 'web-terminal:workspace-folders', folders: [] }]);
   content.dispose(); content.updateFolders(); assert.equal(updates.length, 1);
+});
+
+
+test('编辑器路径保持远程 Linux 与 Windows 路径，按工作区映射 WSL UNC', () => {
+  assert.equal(editorFilePath('/home/me/project/file.ts', 'linux', []), '/home/me/project/file.ts');
+  assert.equal(editorFilePath('D:\\work\\file.ts', 'win32', []), 'D:\\work\\file.ts');
+  assert.equal(editorFilePath('/home/me/other/file.ts', 'win32', [{ fsPath: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\project' }]), '\\\\wsl.localhost\\Ubuntu-24.04\\home\\me\\other\\file.ts');
+  assert.throws(() => editorFilePath('/home/me/file.ts', 'win32', []), /WSL/);
+  assert.throws(() => editorFilePath('relative.ts', 'linux', []), /绝对/);
+  assert.throws(() => editorFilePath('/home/me/\0file', 'linux', []), /无效/);
 });

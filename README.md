@@ -67,9 +67,9 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 
 然后在本机打开 http://localhost:3840 。也可放到已有 HTTPS 反向代理后，代理需支持 WebSocket 并保留 Host。直接用远程 HTTP 地址时，浏览器的部分剪贴板能力可能不可用。
 
-复制 `config.example.yaml` 为 `config.yaml`，按需配置监听地址、端口、默认目录及文件访问范围。环境变量支持 `HOST`、`PORT`、`WEB_TERMINAL_CONFIG`、`WEB_TERMINAL_DATA_DIR`、`WEB_TERMINAL_TOKEN`。相对配置路径以启动目录为基准。
+复制 `config.example.yaml` 为 `config.yaml`，按需配置监听地址、端口、默认目录。环境变量支持 `HOST`、`PORT`、`WEB_TERMINAL_CONFIG`、`WEB_TERMINAL_DATA_DIR`、`WEB_TERMINAL_TOKEN`。相对配置路径以启动目录为基准。
 
-`roots` 控制文件接口的可读目录与会话初始目录，不是 Shell 沙箱。登录者拥有服务运行用户的终端权限。`.data/` 保存 token、会话元数据和上传图片，不应提交到 Git。
+登录者拥有服务运行用户的终端权限。`.data/` 保存 token、会话元数据和上传图片，不应提交到 Git。
 
 需要时在终端里手动运行 `tmux`，再运行其他命令；Web 服务重启后可新建终端并执行 `tmux attach`。
 

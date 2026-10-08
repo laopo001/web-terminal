@@ -12,10 +12,13 @@ export function urlFor(session: string, action: 'meta' | 'content', path: string
   const query = new URLSearchParams({ path }); if (base) query.set('base', base); if (extra) query.set(extra, '1');
   return `/api/sessions/${encodeURIComponent(session)}/files/${action}?${query}`;
 }
-export async function blobUrl(token: string, url: string): Promise<string> {
+export async function fileBlob(token: string, url: string): Promise<Blob> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (response.status === 401) throw new UnauthorizedError();
   if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.error || `HTTP ${response.status}`); }
-  return URL.createObjectURL(await response.blob());
+  return response.blob();
 }
-export type FilePreview = { file: FileInfo; url: string | null; loading: boolean; error?: string };
+export async function blobUrl(token: string, url: string): Promise<string> {
+  return URL.createObjectURL(await fileBlob(token, url));
+}
+export type FilePreview = { file: FileInfo; url: string | null; loading: boolean; text?: string; error?: string };
