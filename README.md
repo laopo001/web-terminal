@@ -24,7 +24,14 @@ cat .data/token
 
 ## 全局 CLI 与本地 link
 
-服务包名为 `@dadigua/web-terminal`，命令名为 `web-terminal`。npm 上的无 scope 同名包是其他项目，不要安装它。本项目尚未发布；本地开发先执行：
+服务包名为 `@dadigua/web-terminal`，命令名为 `web-terminal`。npm 上的无 scope 同名包是其他项目，不要安装它。安装服务：
+
+```bash
+npm install -g @dadigua/web-terminal
+web-terminal start
+```
+
+本地开发使用 link：
 
 ```bash
 pnpm build
@@ -35,7 +42,7 @@ web-terminal restart
 web-terminal stop
 ```
 
-link 指向当前项目；服务端或前端源码修改后执行 `pnpm build`，再重启服务。发布后的安装命令为 `npm install -g @dadigua/web-terminal`。
+link 指向当前项目；服务端或前端源码修改后执行 `pnpm build`，再重启服务。安装命令为 `npm install -g @dadigua/web-terminal`。
 
 CLI 默认使用 `~/.web-terminal/config.yaml`，相对路径以配置文件所在目录为准；每个端口的 token、状态和日志分别位于 `~/.web-terminal/servers/<端口>/data/token`、`server.yaml` 和 `server.log`。首次登录读取对应 token 文件。可用 `--url http://localhost:3841` 选择端口、`--config /path/config.yaml` 指定配置，`--home /path/state` 指定管理目录。CLI 启动为后台进程，关闭客户端不会结束服务；重启保留 token，但结束普通 Shell 会话。
 
@@ -45,8 +52,8 @@ CLI 只停止自己登记且启动标识匹配的进程，不接管 `pnpm start`
 
 1. 首次打开时选择已有会话，或点击“新建 Shell”进入普通命令行；不会自动接入第一条历史会话。通过“＋”选择工作目录；VS Code 中可快捷选择工作区目录。
 2. 在终端里运行 `codex`，照常操作 CLI。 底部输入框点击“发送”或按 Enter 会写入文字并提交一次；中文输入法选词时不会提交。
-3. 粘贴截图、拖入图片，或点击手机工具条的“上传”。图片保存到服务器的 `.data/uploads/<会话ID>/`，上传成功后插入绝对路径，**不会自动按 Enter**。继续写要求，然后自行提交。
-4. 悬停图片路径查看缩略图；点击路径打开右侧预览，复制路径或下载原文件。
+3. 粘贴截图、拖入图片，或点击工具栏的附件按钮。图片保存到服务器的 `.data/uploads/<会话ID>/`，附件区显示预览、上传状态与移除按钮；点击“发送”时，将文字与附件路径一起送入当前终端。支持多图和全部清除。
+4. 悬停图片路径查看缩略图；在浏览器中点击文件路径，弹出图片或文本预览对话框，可复制路径、下载文件，按 Esc 或点击遮罩关闭。Markdown、代码和 YAML 等文本按原文显示，最多 1 MiB。VS Code 内点击路径会交给编辑器打开文件。
 5. VS Code、Electron 和浏览器连接同一服务器并选择同一会话，就会共用一个终端；两端输入会进入同一个 Shell，当前操作的窗口控制尺寸，其他窗口按相同行列数显示。关闭浏览器不会结束会话。默认直接运行 Shell，重启 Web 服务会结束普通 Shell；点击会话的结束按钮才会终止 Shell 并删除该会话上传的图片。
 
 会话首次选中时加载终端和连接，之后切换只隐藏或显示，不重新连接；各会话独立保留草稿、滚动位置、上传和文件预览。隐藏会话继续接收输出，不抢焦点或上报尺寸；关闭会话或退出登录时释放资源。
@@ -75,7 +82,7 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 
 ## 当前验证
 
-已通过类型检查、生产构建和集成测试（含客户端）。共享 Windows Chrome 中验证了 token 保存与刷新恢复、原生文件上传、图片剪贴板粘贴、中文及空格路径的 hover/侧栏预览。Codex CLI 0.159.2 的实际输入框已识别上传图片为 `[Image #1]`，并保留原有文字；测试未提交模型请求。
+已通过类型检查、生产构建和集成测试（含客户端）。共享 Windows Chrome 中验证了 token 保存与刷新恢复、原生文件上传、图片剪贴板粘贴、中文及空格路径的 hover、图片与文本弹窗预览，以及 VS Code 文件打开桥接。Codex CLI 0.159.2 的实际输入框已识别上传图片为 `[Image #1]`，并保留原有文字；测试未提交模型请求。
 
 ## VS Code 与 Electron
 
@@ -89,6 +96,8 @@ pnpm package:vscode
 
 在 VS Code 的扩展菜单选择“从 VSIX 安装”，打开 `release/web-terminal.vsix`。点击活动栏终端图标或运行 `Web Terminal: Show Sidebar` 打开侧边窗口；`Web Terminal: Open` 在编辑器标签页打开。两处均加载现有 Web 页面。默认地址为 `http://localhost:3840`；通过 `Web Terminal: Set Server URL` 或设置 `webTerminal.serverUrl` 修改，`Web Terminal: Reload` 重载；侧栏及编辑器标题栏的重启按钮重启后台并等待就绪。Remote WSL/SSH 在扩展宿主所在机器检测和启动，再使用 VS Code 的端口转发能力。Windows 本机默认先查本机全局 CLI，再查默认 WSL；可通过 `webTerminal.runtime` 和 `webTerminal.cliPath` 调整。
 
+选中编辑器中的文本后，右键选择“发送选中文本到 Web Terminal”，以附件形式加入当前会话，带有文件路径、语言与行号。点击发送后送入终端。
+
 ### Electron
 
 ```bash
@@ -96,7 +105,7 @@ pnpm electron
 pnpm package:electron:win
 ```
 
-开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.0-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
+开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.3-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
 
 浏览器、VS Code、Electron 各自首次在同一 Web 登录页输入 token，验证后保存在各自 Webview 的持久 localStorage 中。客户端配置不保存 token。Electron 远程页面开启 sandbox/contextIsolation、关闭 Node 集成；VS Code 通过专用 `/?embed=vscode` 入口加载，普通入口仍禁止 iframe 嵌入。
 

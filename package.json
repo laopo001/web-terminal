@@ -1,6 +1,6 @@
 {
   "name": "@dadigua/web-terminal",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "scripts": {
     "dev": "tsx src/server/index.ts --dev",
@@ -60,5 +60,17 @@
     "config.example.yaml",
     "README.md",
     "API.md"
-  ]
+  ],
+  "description": "Web Terminal：共享 PTY、图片与文本附件、文件预览及 VS Code 客户端",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/laopo001/web-terminal.git"
+  },
+  "homepage": "https://github.com/laopo001/web-terminal#readme",
+  "bugs": {
+    "url": "https://github.com/laopo001/web-terminal/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
