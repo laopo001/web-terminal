@@ -14,8 +14,8 @@ export function sessionLabel(session: SessionInfo) {
   return { name, folder, agent };
 }
 
-export function SessionTabs({ sessions, selected, status, reachable, onSelect, onClose }: {
-  sessions: SessionInfo[]; selected: string | null; status: string; reachable: boolean;
+export function SessionTabs({ sessions, selected, statuses, reachable, onSelect, onClose }: {
+  sessions: SessionInfo[]; selected: string | null; statuses: Record<string, string>; reachable: boolean;
   onSelect: (id: string) => void; onClose: (session: SessionInfo) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
@@ -31,10 +31,11 @@ export function SessionTabs({ sessions, selected, status, reachable, onSelect, o
   return <div ref={list} className="session-list" aria-label="终端标签">{sessions.map(session => {
     const { name, folder, agent } = sessionLabel(session);
     const active = selected === session.id;
+    const status = statuses[session.id];
     const state = !reachable ? 'offline' : !session.running ? 'ended'
-      : active ? status === '已连接' ? 'live' : status.includes('连接中') || status.includes('重连中') ? 'connecting' : 'offline' : 'live';
-    const hint = !reachable ? '无法连接服务' : !session.running ? '会话已结束' : active ? status : '会话运行中';
-    return <div className={`session ${active ? 'active' : ''}`} key={session.id}>
+      : status === undefined || status === '已连接' ? 'live' : status.includes('连接中') || status.includes('重连中') ? 'connecting' : 'offline';
+    const hint = !reachable ? '无法连接服务' : !session.running ? '会话已结束' : status || '会话运行中';
+    return <div className={`session ${active ? 'active' : ''}`} key={session.id} data-session-id={session.id}>
       <button className="session-select" aria-pressed={active} title={`${name}\n${session.cwd}\n${hint}`} onClick={() => onSelect(session.id)}>
         <span className={`dot ${state}`} aria-label={hint} />
         {agent && <span className={`command-icon ${agent}`} aria-label={agent}>{agent === 'claude' ? '✳' : '›_'}</span>}
