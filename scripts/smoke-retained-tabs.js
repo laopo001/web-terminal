@@ -111,7 +111,7 @@ async (page) => {
     check(await page.evaluate(() => window.__retention.sockets.length === 2 && window.__retention.sockets.every(s => s.closes === 0)), '切换时重建了 WebSocket');
     result.lazyMount = result.domRetained = result.draftsIndependent = result.scrollRetained = result.noReconnectOnSwitch = result.hiddenDoesNotResize = true;
 
-    // 上传途中切换：完成的图片路径只能进入原会话草稿。
+    // 上传途中切换：完成的图片只能留在原会话附件区。
     const uploadGate = new Promise(resolve => { releaseUpload = resolve; });
     const uploadPath = `**/api/sessions/${a.id}/uploads`;
     routedUpload = uploadPath;
@@ -119,7 +119,7 @@ async (page) => {
     await pane(a.id).locator('input[type="file"]').setInputFiles('retained-upload.png');
     await select(b);
     releaseUpload();
-    await page.waitForFunction(id => document.querySelector(`.session-pane[data-session-id="${id}"] [role="textbox"]`).textContent.includes('.png'), a.id);
+    await page.waitForFunction(id => document.querySelector(`.session-pane[data-session-id="${id}"] .attachment-status`)?.textContent === '已上传', a.id);
     check(await editor(b.id).textContent() === 'B 的独立草稿', '后台上传污染了 B 的草稿');
     await page.unroute(uploadPath);
     result.backgroundUploadIsolated = true;

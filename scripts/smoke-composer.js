@@ -93,7 +93,7 @@ async page => {
     }, session.id), '工具栏快捷键没有发送正确按键');
     result.shortcutsWork = true;
     await pane.locator('input[type="file"]').setInputFiles('retained-upload.png');
-    await pane.locator('.upload-state').filter({ hasText: '已插入路径' }).waitFor();
+    await pane.locator('.attachment-card').filter({ hasText: '已上传' }).waitFor();
     check((await measure()).terminalHeight === initial.terminalHeight, '上传状态挤占终端高度');
     result.attachmentWorksWithoutResizing = true;
 

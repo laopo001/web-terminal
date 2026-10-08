@@ -30,13 +30,25 @@ export function iframeHtml(source: string, nonce = randomBytes(16).toString('bas
 const api = acquireVsCodeApi(); api.setState({});
 const frame = document.querySelector('iframe');
 const origin = new URL(frame.src).origin;
+// VS Code 从同源外层 frame 投递消息；其 API 已将 window.parent 重写为 window。
+const fromHost = event => event.origin === window.origin && event.source !== frame.contentWindow;
 let folders = ${JSON.stringify(folders).replaceAll('<', '\\u003c')};
+let composerReady = false;
+const pending = new Map();
+const flush = () => { if (composerReady) for (const attachment of pending.values()) frame.contentWindow.postMessage({ type: 'web-terminal:text-attachment', attachment }, origin); };
 const publish = () => frame.contentWindow.postMessage({ type: 'web-terminal:workspace-folders', folders }, origin);
 window.addEventListener('message', event => {
   if (event.source === frame.contentWindow && event.origin === origin && event.data?.type === 'web-terminal:request-workspace-folders') publish();
-  else if ((event.source === window || event.source === null) && event.data?.type === 'web-terminal:workspace-folders' && Array.isArray(event.data.folders)) { folders = event.data.folders; publish(); }
+  else if (event.source === frame.contentWindow && event.origin === origin) {
+    if (event.data?.type === 'web-terminal:composer-ready') { composerReady = true; flush(); }
+    else if (event.data?.type === 'web-terminal:composer-hidden') composerReady = false;
+    else if (event.data?.type === 'web-terminal:attachment-received') pending.delete(event.data.id);
+  }
+  else if (fromHost(event) && event.data?.type === 'web-terminal:workspace-folders' && Array.isArray(event.data.folders)) { folders = event.data.folders; publish(); }
+  else if (fromHost(event) && event.data?.type === 'web-terminal:text-attachment') { const item = event.data.attachment; if (typeof item?.id === 'string' && typeof item?.name === 'string' && typeof item?.text === 'string') { pending.set(item.id, item); flush(); } }
 });
-frame.addEventListener('load', publish);
+frame.addEventListener('load', () => { composerReady = false; publish(); frame.contentWindow.postMessage({ type: 'web-terminal:request-composer' }, origin); });
+api.postMessage({ type: 'web-terminal:bridge-ready' });
 </script></body></html>`;
 }
 

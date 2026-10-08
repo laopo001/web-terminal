@@ -15,6 +15,8 @@ import { enableTerminalClipboard, writeClipboardText } from './terminalClipboard
 import type { InteractionMode } from './clientSettings';
 import { manageTerminalInputFocus } from './inputFocus';
 
+type Attachment = { id: number; file: File; state: string; failed: boolean; text?: string; path?: string };
+
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 type Props = {
@@ -37,9 +39,11 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const [status, setLocalStatus] = useState('未连接');
   const setStatus = useCallback((value: string) => { setLocalStatus(value); onStatus(sessionId, value); }, [sessionId, onStatus]);
-  const [uploads, setUploads] = useState<{ id: number; file: File; state: string; failed: boolean }[]>([]);
+  const [uploads, renderUploads] = useState<Attachment[]>([]);
+  const uploadsRef = useRef<Attachment[]>([]);
+  const setUploads = (update: (items: Attachment[]) => Attachment[]) => { uploadsRef.current = update(uploadsRef.current); renderUploads(uploadsRef.current); };
   const uploadId = useRef(0);
-  const uploadFailures = useRef(new Map<number, string>());
+  const receivedAttachments = useRef(new Set<string>());
   const [preview, setPreview] = useState<{ file: FileInfo; url: string | null; loading: boolean; error?: string } | null>(null);
   const [hover, setHover] = useState<{ file: FileInfo; url: string | null; x: number; y: number; error?: string } | null>(null);
   const [draft, setDraft] = useState('');
@@ -254,25 +258,42 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     return () => { cancelled = true; };
   }, [fontFamily]);
 
+  useEffect(() => {
+    if (!active || window.parent === window || new URLSearchParams(location.search).get('embed') !== 'vscode') return;
+    const receive = (event: MessageEvent) => {
+      if (event.source !== window.parent || !activeRef.current) return;
+      if (event.data?.type === 'web-terminal:request-composer') { window.parent.postMessage({ type: 'web-terminal:composer-ready' }, '*'); return; }
+      if (event.data?.type !== 'web-terminal:text-attachment') return;
+      const item = event.data.attachment;
+      if (typeof item?.id !== 'string' || typeof item?.text !== 'string' || typeof item?.name !== 'string') return;
+      if (!receivedAttachments.current.has(item.id)) {
+        receivedAttachments.current.add(item.id);
+        setUploads(items => [...items, { id: ++uploadId.current, file: new File([item.text], item.name, { type: 'text/plain' }), text: item.text, state: '待发送', failed: false }]);
+        draftInput.current?.focus();
+      }
+      window.parent.postMessage({ type: 'web-terminal:attachment-received', id: item.id }, '*');
+    };
+    window.addEventListener('message', receive);
+    window.parent.postMessage({ type: 'web-terminal:composer-ready' }, '*');
+    return () => { window.removeEventListener('message', receive); window.parent.postMessage({ type: 'web-terminal:composer-hidden' }, '*'); };
+  }, [active]);
+
   const uploadFile = (file: File) => {
     const id = sessionId, key = token;
     if (!mounted.current) return;
     if (!imageTypes.has(file.type)) { setNotice('仅支持 PNG、JPEG、WebP、GIF 图片'); return; }
     if (file.size > maxUploadBytes) { setNotice('图片超过上传大小限制'); return; }
     const itemId = ++uploadId.current;
-    const update = (state: string, failed = false) => { if (!mounted.current) return; if (failed) uploadFailures.current.set(itemId, id); else uploadFailures.current.delete(itemId); setUploads(items => items.map(item => item.id === itemId ? { ...item, state, failed } : item)); };
+    const update = (state: string, failed = false, path?: string) => { if (!mounted.current) return; setUploads(items => items.map(item => item.id === itemId ? { ...item, state, failed, path } : item)); };
     setUploads(items => [...items, { id: itemId, file, state: '排队上传…', failed: false }]);
     uploadQueue.current = uploadQueue.current.catch(() => undefined).then(async () => {
-      if (!mounted.current) return;
+      if (!mounted.current || !uploadsRef.current.some(item => item.id === itemId)) return;
       update('正在上传…');
       const form = new FormData(); form.append('file', file);
       try {
         const result = await api<FileInfo>(key, `/api/sessions/${encodeURIComponent(id)}/uploads`, { method: 'POST', body: form });
         if (!mounted.current) return;
-        if (activeRef.current && socket.current?.readyState === WebSocket.OPEN && readyRef.current) {
-          claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text: quoteForShell(result.path), submit: false } satisfies ClientMessage));
-          update('已插入路径');
-        } else { update('已上传，路径已保存到草稿'); setDraft(value => value + ' ' + quoteForShell(result.path)); if (activeRef.current) setNotice('路径已保存在当前会话草稿中'); }
+        update('已上传', false, result.path);
       } catch (error) { if (!mounted.current) return; if (error instanceof UnauthorizedError) logout(); else update(errorText(error), true); }
     });
   };
@@ -283,23 +304,26 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     const id = sessionId;
     // 按钮点击已结束编辑，从 DOM 读取输入法刚提交的文字，避免使用上一帧草稿。
     const text = explicit ? draftInput.current?.innerText ?? draft : draft;
-    if (!id || !text.trim()) return;
+    if (!id || (!text.trim() && !uploadsRef.current.length)) return;
     const sentUploadId = uploadId.current;
     sendingRef.current = true; setSending(true);
     try {
       await uploadQueue.current;
       if (!mounted.current || !activeRef.current) return;
-      if ([...uploadFailures.current.values()].includes(id)) { setNotice('图片尚未上传成功，请重试或移除后发送'); return; }
+      const attachments = uploadsRef.current.filter(item => item.id <= sentUploadId);
+      if (attachments.some(item => item.failed)) { setNotice('图片尚未上传成功，请重试或移除后发送'); return; }
       if (!readyRef.current) { setNotice('连接未就绪，文字已保留'); return; }
       if (socket.current?.readyState === WebSocket.OPEN) {
-        claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text, submit: true } satisfies ClientMessage));
+        const payload = [text, ...attachments.map(item => item.text ?? (item.path ? quoteForShell(item.path) : ''))].filter(Boolean).join('\n');
+        if (!payload.trim()) return;
+        claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text: payload, submit: true } satisfies ClientMessage));
         setDraft(value => value === text ? '' : value);
         setUploads(items => items.filter(item => item.id > sentUploadId));
       }
     } finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   };
-  const onPaste = (event: React.ClipboardEvent) => { const file = [...event.clipboardData.items].find(item => item.kind === 'file' && imageTypes.has(item.type))?.getAsFile(); if (file) { event.preventDefault(); event.stopPropagation(); void uploadFile(file); } };
-  const onDrop = (event: React.DragEvent) => { event.preventDefault(); const file = [...event.dataTransfer.files].find(f => imageTypes.has(f.type)); if (file) void uploadFile(file); };
+  const onPaste = (event: React.ClipboardEvent) => { const files = [...event.clipboardData.items].filter(item => item.kind === 'file' && imageTypes.has(item.type)).flatMap(item => { const file = item.getAsFile(); return file ? [file] : []; }); if (files.length) { event.preventDefault(); event.stopPropagation(); files.forEach(uploadFile); } };
+  const onDrop = (event: React.DragEvent) => { event.preventDefault(); [...event.dataTransfer.files].filter(f => imageTypes.has(f.type)).forEach(uploadFile); };
   useEffect(() => () => { if (hoverUrl.current) URL.revokeObjectURL(hoverUrl.current); if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); }, []);
 
 
@@ -309,7 +333,15 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   }, [active, revokeHover]);
 
   return <div className="content session-pane" hidden={!active} data-session-id={sessionId}><div className="terminal-pane"><div className="terminal-wrap" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}><div ref={terminalHost} className="terminal-host" /></div><div className="composer-dock"><div className="composer-panel" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}>
-        {uploads.length > 0 && <div className="composer-uploads" aria-label="图片上传状态">{uploads.map(item => <div key={item.id} className={`upload-state ${item.failed ? 'error' : ''}`}><UploadThumbnail file={item.file} /><span>{item.file.name} · {item.state}</span>{item.failed && <button onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}<button aria-label={`移除 ${item.file.name}`} onClick={() => { uploadFailures.current.delete(item.id); setUploads(items => items.filter(x => x.id !== item.id)); }}>×</button></div>)}</div>}
+        {uploads.length > 0 && <div className="composer-attachments" aria-label="待发送附件">
+          <span className="attachment-count" title={`${uploads.length} 个附件`}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.9-2.9l8.5-8.5" /></svg> {uploads.length}</span>
+          <div className="attachment-list">{uploads.map(item => <div key={item.id} className={`attachment-card ${item.failed ? 'error' : ''}`}>
+            {item.text !== undefined ? <pre className="attachment-text">{item.text}</pre> : <UploadThumbnail file={item.file} />}
+            <div className="attachment-caption"><span title={item.file.name}>{item.text !== undefined ? '▤ ' : ''}{item.file.name}</span><button aria-label={`移除 ${item.file.name}`} onClick={() => setUploads(items => items.filter(x => x.id !== item.id))}>×</button></div>
+            <div className="attachment-status" title={item.state}>{item.state}{item.failed && <button onClick={() => { setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}</div>
+          </div>)}</div>
+          <button className="attachment-clear" onClick={() => setUploads(() => [])}>全部清除</button>
+        </div>}
         <div className="draft-row"><DraftInput ref={draftInput} style={{ fontFamily }} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={setDraft} onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); }
         }} placeholder="输入命令或描述…" /></div>
@@ -323,7 +355,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             <button className="copy-mode-toggle" title={copyMode ? '退出复制模式，恢复手指滚屏' : '进入复制模式，手指拖动选字'} aria-label="复制模式" aria-pressed={copyMode} onClick={() => setCopyMode(value => !value)}>{copyMode ? '退出复制' : '复制'}</button>
           </div>
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
-          <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft(true)} disabled={!draft.trim() || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
+          <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft(true)} disabled={(!draft.trim() && !uploads.length) || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
         </div>
-      </div></div></div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void uploadFile(file); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
+      </div></div></div>{preview && <aside className="preview"><div className="preview-head"><span>文件预览</span><button onClick={revokePreview}>×</button></div><div className="preview-body"><h2 title={preview.file.path}>{preview.file.name}</h2><p className="file-path">{preview.file.path}</p>{preview.loading && <p>加载图片中…</p>}{preview.error && <p className="error">{preview.error}</p>}{preview.url && preview.file.mime.startsWith('image/') && <img src={preview.url} alt={preview.file.name} />}<dl><dt>类型</dt><dd>{preview.file.mime || '未知'}</dd><dt>大小</dt><dd>{preview.file.size ? `${(preview.file.size / 1024).toFixed(1)} KB` : '未知'}</dd>{preview.file.width && <><dt>尺寸</dt><dd>{preview.file.width} × {preview.file.height}</dd></>}</dl><div className="preview-buttons"><button onClick={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))}>复制路径</button><button className="primary" onClick={() => void download(preview.file)}>下载文件</button></div></div></aside>}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={e => { const files = [...(e.target.files || [])]; e.target.value = ''; files.forEach(uploadFile); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
 }

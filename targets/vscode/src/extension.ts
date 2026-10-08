@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'node:crypto';
 import { defaultServerUrl, normalizeServerUrl, vscodeEmbedUrl } from '../../../src/shared/clientUrl.js';
 import { forwardedEmbedUrl } from './html.js';
 import { workspacePath } from './workspace.js';
@@ -11,6 +12,7 @@ let panelContent: WebviewContent | undefined;
 let sidebarContent: WebviewContent | undefined;
 const sidebarId = 'webTerminal.sidebar';
 let restarting = false;
+let lastSurface: 'panel' | 'sidebar' = 'sidebar';
 
 function serviceSettings() {
   const config = vscode.workspace.getConfiguration('webTerminal');
@@ -77,6 +79,8 @@ function attach(current: vscode.WebviewPanel): void {
   panel = current;
   const content = new WebviewContent(current.webview, externalUrl, workspaceFolders);
   panelContent = content;
+  current.onDidChangeViewState(() => { if (current.active) lastSurface = 'panel'; });
+  current.webview.onDidReceiveMessage(message => content.receive(message));
   current.onDidDispose(() => {
     content.dispose();
     if (panel === current) { panel = undefined; panelContent = undefined; }
@@ -92,6 +96,21 @@ function open(): void {
   attach(current);
 }
 
+async function sendSelection(): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.selection.isEmpty) { void vscode.window.showInformationMessage('请先选中要发送的文本'); return; }
+  const document = editor.document;
+  const text = editor.selections.filter(selection => !selection.isEmpty).map(selection => document.getText(selection)).join('\n');
+  const path = workspacePath(document.uri) || document.uri.toString();
+  const attachment = { id: randomUUID(), name: path.split(/[\\/]/).pop() || '选中文本', text: `Path: ${path}\nLanguage: ${document.languageId}\nLines: ${editor.selection.start.line + 1}-${editor.selection.end.line + 1}\n\n${text}` };
+  if (lastSurface === 'panel' && panelContent) { panel?.reveal(undefined, true); panelContent.sendAttachment(attachment); }
+  else {
+    await vscode.commands.executeCommand(`${sidebarId}.focus`);
+    if (sidebarContent) sidebarContent.sendAttachment(attachment);
+    else { open(); panelContent?.sendAttachment(attachment); }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(sidebarId, {
@@ -100,6 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
         const content = new WebviewContent(view.webview, externalUrl, workspaceFolders);
         sidebarContent?.dispose();
         sidebarContent = content;
+        view.webview.onDidReceiveMessage(message => content.receive(message));
+        view.onDidChangeVisibility(() => { if (view.visible) lastSurface = 'sidebar'; });
         view.onDidDispose(() => {
           content.dispose();
           if (sidebarContent === content) sidebarContent = undefined;
@@ -108,7 +129,8 @@ export function activate(context: vscode.ExtensionContext): void {
       },
     }, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('webTerminal.showSidebar', () => vscode.commands.executeCommand(`${sidebarId}.focus`)),
-    vscode.commands.registerCommand('webTerminal.open', open),
+    vscode.commands.registerCommand('webTerminal.open', () => { lastSurface = 'panel'; open(); }),
+    vscode.commands.registerCommand('webTerminal.sendSelection', sendSelection),
     vscode.commands.registerCommand('webTerminal.restartServer', restartServer),
     vscode.commands.registerCommand('webTerminal.reload', () => {
       if (!panelContent && !sidebarContent) { void vscode.commands.executeCommand(`${sidebarId}.focus`); return; }

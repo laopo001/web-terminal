@@ -18,9 +18,9 @@ test('工作区桥接校验 iframe 来源，传递全部目录并阻止 HTML 注
   const sent: unknown[] = [];
   const child = { postMessage: (message: unknown, origin: string) => sent.push({ message, origin }) };
   let listener: (event: unknown) => void = () => {};
-  const window = { addEventListener: (_: string, fn: typeof listener) => { listener = fn; } };
+  const window = { origin: 'vscode-webview://workspace-host', addEventListener: (_: string, fn: typeof listener) => { listener = fn; } };
   runInNewContext(html.match(/<script nonce="nonce">([\s\S]*?)<\/script>/)![1], {
-    acquireVsCodeApi: () => ({ setState() {} }), URL, window,
+    acquireVsCodeApi: () => ({ setState() {}, postMessage() {} }), URL, window,
     document: { querySelector: () => ({ src: 'https://terminal.example/?embed=vscode', contentWindow: child, addEventListener() {} }) },
   });
   listener({ source: {}, origin: 'https://terminal.example', data: { type: 'web-terminal:request-workspace-folders' } });
@@ -28,7 +28,7 @@ test('工作区桥接校验 iframe 来源，传递全部目录并阻止 HTML 注
   assert.equal(sent.length, 0);
   listener({ source: child, origin: 'https://terminal.example', data: { type: 'web-terminal:request-workspace-folders' } });
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ message: { type: 'web-terminal:workspace-folders', folders }, origin: 'https://terminal.example' }]);
-  listener({ source: null, data: { type: 'web-terminal:workspace-folders', folders: [] } });
+  listener({ source: {}, origin: window.origin, data: { type: 'web-terminal:workspace-folders', folders: [] } });
   assert.equal(sent.length, 2);
   const updates: unknown[] = [];
   let current = folders;

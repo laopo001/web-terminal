@@ -36,3 +36,30 @@ test('forwarded URL retains other parameters and forces VS Code embed mode', () 
     'https://forwarded.example/path?route=1&embed=vscode');
   assert.throws(() => forwardedEmbedUrl('file:///tmp/a'));
 });
+
+test('iframe queues text until a composer is ready and checks sender origin', async () => {
+  const { runInNewContext } = await import('node:vm');
+  const html = iframeHtml('http://localhost:3840/?embed=vscode', 'test');
+  const source = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1];
+  let receive: (event: unknown) => void = () => {};
+  let load: () => void = () => {};
+  const delivered: any[] = [];
+  const host: any[] = [];
+  const frame = { src: 'http://localhost:3840/?embed=vscode', contentWindow: { postMessage: (message: unknown) => delivered.push(message) }, addEventListener: (_: string, fn: () => void) => { load = fn; } };
+  const window = { origin: 'vscode-webview://test-host', addEventListener: (_: string, fn: typeof receive) => { receive = fn; } };
+  runInNewContext(source, { window, document: { querySelector: () => frame }, URL, acquireVsCodeApi: () => ({ setState() {}, postMessage: (message: unknown) => host.push(message) }) });
+  assert.equal(host[0].type, 'web-terminal:bridge-ready');
+  const attachment = { id: '1', name: 'code.ts', text: 'example' };
+  const outerFrame = {}; // VS Code 的外层 frame，与 window、null 均不同。
+  receive({ source: outerFrame, origin: 'https://untrusted.example', data: { type: 'web-terminal:text-attachment', attachment: { ...attachment, id: 'forged' } } });
+  receive({ source: outerFrame, origin: window.origin, data: { type: 'web-terminal:text-attachment', attachment } });
+  assert.equal(delivered.length, 0);
+  receive({ source: frame.contentWindow, origin: 'https://untrusted.example', data: { type: 'web-terminal:composer-ready' } });
+  assert.equal(delivered.length, 0);
+  load();
+  receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: { type: 'web-terminal:composer-ready' } });
+  assert.equal(delivered.filter(m => m.type === 'web-terminal:text-attachment').length, 1);
+  receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: { type: 'web-terminal:attachment-received', id: '1' } });
+  receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: { type: 'web-terminal:composer-ready' } });
+  assert.equal(delivered.filter(m => m.type === 'web-terminal:text-attachment').length, 1);
+});

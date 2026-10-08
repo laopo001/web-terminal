@@ -11,6 +11,7 @@
   "activationEvents": ["onCommand:webTerminal.open", "onWebviewPanel:webTerminal.panel", "onView:webTerminal.sidebar"],
   "contributes": {
     "commands": [
+      { "command": "webTerminal.sendSelection", "title": "发送选中文本到 Web Terminal", "category": "Web Terminal" },
       { "command": "webTerminal.showSidebar", "title": "Show Sidebar", "category": "Web Terminal" },
       { "command": "webTerminal.open", "title": "Open", "category": "Web Terminal", "icon": "$(open-preview)" },
       { "command": "webTerminal.reload", "title": "Reload", "category": "Web Terminal", "icon": "$(refresh)" },
@@ -24,6 +25,9 @@
       "webTerminal": [{ "id": "webTerminal.sidebar", "name": "Web Terminal", "type": "webview" }]
     },
     "menus": {
+      "editor/context": [
+        { "command": "webTerminal.sendSelection", "when": "editorHasSelection", "group": "navigation@20" }
+      ],
       "editor/title": [
         { "command": "webTerminal.restartServer", "when": "activeWebviewPanelId == webTerminal.panel", "group": "navigation@1" }
       ],
