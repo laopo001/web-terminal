@@ -37,7 +37,7 @@ async page => {
       await draft.click(); check(await draft.evaluate(el => el === document.activeElement), '点击输入框不能聚焦');
       await page.evaluate(() => { window.__focusTest.editingFocus.length = 0; });
     };
-    const tapButton = async (button, editor = draft) => {
+    const tapButton = async (button, editor = draft, preserve = false) => {
       await editor.click();
       await editor.evaluate(el => {
         document.documentElement.style.setProperty('--app-height', '540px');
@@ -48,10 +48,12 @@ async page => {
       await touch('touchStart', [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }]);
       check(await editor.evaluate(el => el === document.activeElement), '按钮按下提前结束编辑');
       await touch('touchEnd', []);
-      check(await notEditing(), '按钮操作保留了编辑焦点');
+      if (preserve) check(await editor.evaluate(el => el === document.activeElement), '快捷键结束了输入焦点');
+      else check(await notEditing(), '按钮操作保留了编辑焦点');
+      await page.evaluate(() => document.documentElement.style.setProperty('--app-height', '844px'));
     };
-    const clickTool = async button => {
-      await focusDraft(); await tapButton(button);
+    const clickTool = async (button, preserve = false) => {
+      await focusDraft(); await tapButton(button, draft, preserve);
       check(await page.evaluate(() => window.__focusTest.editingFocus.length) === 0, '工具栏主动聚焦了编辑框');
     };
     const screen = await pane.locator('.xterm-screen').boundingBox();
@@ -66,17 +68,17 @@ async page => {
     await clickTool(pane.getByRole('button', { name: '复制模式', exact: true }));
     check(await draft.innerText() === '保留的草稿', '复制模式清空草稿');
     let before = (await sent()).length;
-    await clickTool(pane.getByRole('button', { name: 'Esc', exact: true }));
+    await clickTool(pane.getByRole('button', { name: 'Esc', exact: true }), true);
     check((await sent()).slice(before).includes('\x1b'), 'Esc 按钮失效');
     before = (await sent()).length;
-    await clickTool(pane.getByRole('button', { name: '中断当前程序', exact: true }));
+    await clickTool(pane.getByRole('button', { name: '中断当前程序', exact: true }), true);
     check((await sent()).slice(before).includes('\x03'), 'Ctrl C 按钮失效');
     for (const [name, sequences] of [
       ['Tab', ['\t']], ['左方向键', ['\x1b[D', '\x1bOD']], ['上方向键', ['\x1b[A', '\x1bOA']],
       ['下方向键', ['\x1b[B', '\x1bOB']], ['右方向键', ['\x1b[C', '\x1bOC']],
     ]) {
       before = (await sent()).length;
-      await clickTool(pane.getByRole('button', { name, exact: true }));
+      await clickTool(pane.getByRole('button', { name, exact: true }), true);
       const actual = (await sent()).slice(before);
       check(actual.length === 1 && sequences.includes(actual[0]), `${name} 未恰好发送一次：${JSON.stringify(actual)}`);
     }
@@ -124,9 +126,9 @@ async page => {
     const submissions = await page.evaluate(id => window.__focusTest.sockets.filter(s => s.id === id).flatMap(s => s.sent).filter(m => m.type === 'paste' && m.submit).map(m => m.text), session.id);
     check(submissions.length === 2 && submissions[0] === "printf 'focus-send-test\\n'" && submissions[1] === '中文输入最终文字', `发送重复或使用旧草稿：${JSON.stringify(submissions)}`);
     before = (await sent()).length;
-    await clickTool(pane.getByRole('button', { name: '上方向键', exact: true }));
+    await clickTool(pane.getByRole('button', { name: '上方向键', exact: true }), true);
     check((await sent()).slice(before).some(data => data === '\x1b[A' || data === '\x1bOA'), '方向按钮失效');
-    await clickTool(pane.getByRole('button', { name: '中断当前程序', exact: true }));
+    await clickTool(pane.getByRole('button', { name: '中断当前程序', exact: true }), true);
     await clickTool(page.getByRole('button', { name: '设置', exact: true }));
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
     await settings.getByLabel('终端字体', { exact: true }).click();
@@ -202,7 +204,7 @@ async page => {
     check(await notEditing(), '退出复制模式主动聚焦');
     await tapTerminal();
     check(await pane.locator('.xterm-helper-textarea').evaluate(el => el === document.activeElement && !el.readOnly), '退出复制模式未恢复终端输入焦点');
-    return { allShortcutButtonsSendOnce: true, attachmentRetryAndRemove: true, settingsButtons: true, directoryButtons: true, sessionButtons: true, singleTouchSendWithKeyboardResize: true, compositionSendOnce: true, normalTerminalFocus: true, exitCopyRestoresFocus: true, inputClickFocus: true, toolbarDoesNotFocus: true, shortcutsWork: true, sendDoesNotRefocus: true, dialogsDoNotRefocus: true, clipboardFallbackDoesNotRefocus: true, terminalTouchDoesNotEdit: true, hardwareKeyboardAndPaste: true };
+    return { shortcutsPreserveInputFocus: true, allShortcutButtonsSendOnce: true, attachmentRetryAndRemove: true, settingsButtons: true, directoryButtons: true, sessionButtons: true, singleTouchSendWithKeyboardResize: true, compositionSendOnce: true, normalTerminalFocus: true, exitCopyRestoresFocus: true, inputClickFocus: true, toolbarDoesNotFocus: true, shortcutsWork: true, sendDoesNotRefocus: true, dialogsDoNotRefocus: true, clipboardFallbackDoesNotRefocus: true, terminalTouchDoesNotEdit: true, hardwareKeyboardAndPaste: true };
   } finally {
     await page.evaluate(async id => { await fetch(`/api/sessions/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${localStorage.getItem('web-terminal.token')}` } }); }, session.id);
     await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false }); await cdp.detach();

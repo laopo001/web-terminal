@@ -313,13 +313,13 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
         <div className="draft-row"><DraftInput ref={draftInput} style={{ fontFamily }} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={setDraft} onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); }
         }} placeholder="输入命令或描述…" /></div>
-        <div className="mobile-keys" role="toolbar" aria-label="触屏终端快捷键"><button disabled={status !== '已连接'} onClick={() => sendKey('\t')}>Tab</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}</div>
+        <div className="mobile-keys" data-preserve-input-focus role="toolbar" aria-label="触屏终端快捷键"><button disabled={status !== '已连接'} onClick={() => sendKey('\t')}>Tab</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}</div>
         <div className="composer-actions">
           <div className="composer-tools" role="toolbar" aria-label="终端操作">
             <button className="attach-image" title="添加图片，也可粘贴或拖入" aria-label="添加图片" onClick={() => fileInput.current?.click()}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.9-2.9l8.5-8.5" /></svg></button>
             <span className="composer-divider" />
-            <button title="发送 Esc" disabled={status !== '已连接'} onClick={() => sendKey('\x1b')}>Esc</button>
-            <button title="中断当前程序（Ctrl+C）" aria-label="中断当前程序" disabled={status !== '已连接'} onClick={() => sendKey('\x03')}>Ctrl C</button>
+            <button data-preserve-input-focus title="发送 Esc" disabled={status !== '已连接'} onClick={() => sendKey('\x1b')}>Esc</button>
+            <button data-preserve-input-focus title="中断当前程序（Ctrl+C）" aria-label="中断当前程序" disabled={status !== '已连接'} onClick={() => sendKey('\x03')}>Ctrl C</button>
             <button className="copy-mode-toggle" title={copyMode ? '退出复制模式，恢复手指滚屏' : '进入复制模式，手指拖动选字'} aria-label="复制模式" aria-pressed={copyMode} onClick={() => setCopyMode(value => !value)}>{copyMode ? '退出复制' : '复制'}</button>
           </div>
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>

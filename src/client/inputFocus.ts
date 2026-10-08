@@ -21,6 +21,7 @@ export function useInputFocusPolicy() {
       if (event.type === 'pointerdown' && button && !button.disabled && isEditingField(active)) {
         event.preventDefault(); return;
       }
+      if (button?.closest('[data-preserve-input-focus]')) return;
       if (active?.matches('.xterm-helper-textarea') && target?.closest('.xterm')?.contains(active)) return;
       if (isEditingField(active)) active.blur();
     };
