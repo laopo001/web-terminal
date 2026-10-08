@@ -32,6 +32,12 @@ async function restartServer(): Promise<void> {
   restarting = true;
   try {
     const { url, options } = serviceSettings();
+    const confirm = await vscode.window.showWarningMessage(
+      '确定重启 Web Terminal 后台服务？',
+      { modal: true, detail: `服务地址：${url}\n重启会结束所有普通 Shell 会话及其中运行的程序，访问令牌会保留。` },
+      '重启服务',
+    );
+    if (confirm !== '重启服务') return;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Web Terminal：正在重启后台服务…' }, async () => {
       await ensureService(url, options, 'restart');
       await refresh(true);
