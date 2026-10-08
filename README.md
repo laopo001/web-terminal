@@ -48,6 +48,10 @@ CLI 默认使用 `~/.web-terminal/config.yaml`，相对路径以配置文件所�
 
 CLI 只停止自己登记且启动标识匹配的进程，不接管 `pnpm start` 或 systemd 启动的外部服务。外部服务可以连接，重启时会提示使用原管理器。
 
+## 发布
+
+推送与 `package.json` 版本一致的 `v*` 标签后，`.github/workflows/publish.yaml` 自动检查、构建、打包，并通过 npm Trusted Publishing 发布，再创建 GitHub Release 和上传附件。npm 仅信任 `laopo001/web-terminal` 仓库中的此工作流，不需要发布 token。手动运行工作流只验证和生成产物。
+
 ## 使用
 
 1. 首次打开时选择已有会话，或点击“新建 Shell”进入普通命令行；不会自动接入第一条历史会话。通过“＋”选择工作目录；VS Code 中可快捷选择工作区目录。
