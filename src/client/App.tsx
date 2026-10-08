@@ -8,17 +8,18 @@ import { useWorkspaceFolders } from './useWorkspaceFolders';
 import { SessionTabs } from './SessionTabs';
 import { SessionPane } from './SessionPane';
 import { useVisualViewport } from './useVisualViewport';
-import { FontSettings } from './FontSettings';
-import { defaultTerminalFont, loadTerminalFont, saveTerminalFont } from './terminalFont';
+import { SettingsDialog } from './SettingsDialog';
+import { defaultTerminalFont } from './terminalFont';
+import { loadClientSettings, saveClientSettings } from './clientSettings';
 
 const tokenKey = 'web-terminal.token';
 
 export default function App() {
   useVisualViewport();
-  const [customFont, setCustomFont] = useState(loadTerminalFont);
-  const [fontSettingsOpen, setFontSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(loadClientSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultFont = defaultTerminalFont(navigator.platform);
-  const fontFamily = customFont || defaultFont;
+  const fontFamily = settings.fontFamily || defaultFont;
   const [token, setToken] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [authValue, setAuthValue] = useState('');
@@ -101,14 +102,14 @@ export default function App() {
   if (!token) return <main className="auth-shell"><form className="auth-card" onSubmit={event => { event.preventDefault(); void login(authValue.trim() || localStorage.getItem(tokenKey) || ''); }}><span className="brand-mark">›_</span><h1>Web Terminal</h1><p>输入访问令牌，连接到你的工作空间。</p><label htmlFor="token">访问令牌</label><input id="token" type="password" autoComplete="off" value={authValue} onChange={e => setAuthValue(e.target.value)} placeholder={localStorage.getItem(tokenKey) ? '已保存令牌，可直接重试' : '粘贴访问令牌'} /><button className="primary" disabled={busy}>连接</button>{authError && <div className="error" role="alert">{authError}</div>}</form></main>;
   return <div className="app"><header className="tabs-bar">
     <SessionTabs sessions={sessions} selected={selected} statuses={statuses} reachable={reachable} onSelect={selectSession} onClose={session => { setCloseError(''); setPendingClose(session); }} />
-    <div className="tab-actions"><button title="字体设置" aria-label="字体设置" onClick={() => setFontSettingsOpen(true)}>Aa</button><button title="创建会话" aria-label="创建会话" onClick={() => setCreating(value => !value)}>＋</button></div>
+    <div className="tab-actions"><button title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3h4l.5 3 2 .9 2.5-1.5 2 3.4-2 2.1v2.2l2 2.1-2 3.4-2.5-1.5-2 .9-.5 3h-4l-.5-3-2-.9-2.5 1.5-2-3.4 2-2.1v-2.2l-2-2.1 2-3.4 2.5 1.5 2-.9Z" /><circle cx="12" cy="12" r="3" /></svg></button><button title="创建会话" aria-label="创建会话" onClick={() => setCreating(value => !value)}>＋</button></div>
     {creating && <DirectoryPicker token={token} initialPath={workspaceFolders[0]?.path || current?.cwd || info?.defaultCwd || ''} home={info?.defaultCwd || ''} folders={workspaceFolders} busy={busy} onCreate={createSession} onClose={() => setCreating(false)} onUnauthorized={logout} />}
   </header><div className="workspace">
     {!selected && <div className="content"><div className="terminal-pane"><div className="empty-session"><strong>命令行终端</strong><p>{sessions.length ? '选择已有会话继续使用，或新建一个 Shell。' : '新建一个普通 Shell，运行你需要的命令。'}</p><button className="primary" disabled={busy} onClick={() => setCreating(true)}>新建 Shell</button></div></div></div>}
-    {sessions.filter(session => visited.includes(session.id)).map(session => <SessionPane key={session.id} session={session} token={token} active={selected === session.id} fontFamily={fontFamily} maxUploadBytes={info?.maxUploadBytes ?? 20 * 1024 * 1024} onNotice={setNotice} onUnauthorized={logout} onStatus={onStatus} setSessions={setSessions} setReachable={setReachable} />)}
+    {sessions.filter(session => visited.includes(session.id)).map(session => <SessionPane key={session.id} session={session} token={token} active={selected === session.id} fontFamily={fontFamily} interactionMode={settings.interactionMode} maxUploadBytes={info?.maxUploadBytes ?? 20 * 1024 * 1024} onNotice={setNotice} onUnauthorized={logout} onStatus={onStatus} setSessions={setSessions} setReachable={setReachable} />)}
   </div>
   {notice.text && <MessageToast key={notice.id} message={notice.text} onClose={clearNotice} />}
   {pendingClose && <CloseSessionDialog name={pendingClose.name} busy={closing} error={closeError} onCancel={() => setPendingClose(null)} onConfirm={() => void endSession(pendingClose)} />}
-  {fontSettingsOpen && <FontSettings value={customFont} defaultFont={defaultFont} onClose={() => setFontSettingsOpen(false)} onSave={font => { saveTerminalFont(font); setCustomFont(font); setFontSettingsOpen(false); }} />}
+  {settingsOpen && <SettingsDialog value={settings} defaultFont={defaultFont} onClose={() => setSettingsOpen(false)} onSave={next => { saveClientSettings(next); setSettings(next); setSettingsOpen(false); }} />}
   </div>;
 }

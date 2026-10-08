@@ -7,16 +7,17 @@ import { api, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
 import { pathLinkProvider } from './links';
 import { arrowSequence } from './terminalKeys';
 import { DraftInput } from './DraftInput';
-import { enableTouchScroll } from './terminalTouch';
+import { enableTouchInteraction } from './terminalTouch';
 import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection } from './terminalInteraction';
 import { suppressTerminalResponses } from './terminalResponses';
 import { UploadThumbnail } from './UploadThumbnail';
-import { enableTerminalClipboard } from './terminalClipboard';
+import { enableTerminalClipboard, writeClipboardText } from './terminalClipboard';
+import type { InteractionMode } from './clientSettings';
 
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 type Props = {
-  session: SessionInfo; token: string; active: boolean; fontFamily: string; maxUploadBytes: number;
+  session: SessionInfo; token: string; active: boolean; fontFamily: string; interactionMode: InteractionMode; maxUploadBytes: number;
   onNotice: (text: string) => void; onUnauthorized: () => void;
   onStatus: (id: string, status: string) => void;
   setSessions: React.Dispatch<React.SetStateAction<SessionInfo[]>>;
@@ -24,7 +25,7 @@ type Props = {
 };
 
 /** 首次选中后保留；隐藏只停止交互与尺寸上报，连接和画面继续更新。 */
-export function SessionPane({ session, token, active, fontFamily, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout, onStatus, setSessions, setReachable }: Props) {
+export function SessionPane({ session, token, active, fontFamily, interactionMode, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout, onStatus, setSessions, setReachable }: Props) {
   const sessionId = session.id;
   const activeRef = useRef(active);
   const fontRef = useRef(fontFamily);
@@ -40,6 +41,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
   const [preview, setPreview] = useState<{ file: FileInfo; url: string | null; loading: boolean; error?: string } | null>(null);
   const [hover, setHover] = useState<{ file: FileInfo; url: string | null; x: number; y: number; error?: string } | null>(null);
   const [draft, setDraft] = useState('');
+  const [copyMode, setCopyMode] = useState(false);
   const composing = useRef(false);
   const compositionEnded = useRef(0);
   const [sending, setSending] = useState(false);
@@ -47,10 +49,15 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
   const readyRef = useRef(false);
   const claimRef = useRef<() => void>(() => {});
   const activateRef = useRef<() => void>(() => {});
+  const cancelTouchRef = useRef<() => void>(() => {});
+  const copyModeRef = useRef(false);
+  const interactionModeRef = useRef(interactionMode);
   const draftInput = useRef<HTMLDivElement>(null);
   const terminalHost = useRef<HTMLDivElement>(null);
   const socket = useRef<WebSocket | null>(null);
   const termRef = useRef<Terminal | null>(null);
+  useLayoutEffect(() => { interactionModeRef.current = interactionMode; copyModeRef.current = false; setCopyMode(false); cancelTouchRef.current(); termRef.current?.clearSelection(); }, [interactionMode]);
+  useLayoutEffect(() => { copyModeRef.current = copyMode; cancelTouchRef.current(); termRef.current?.clearSelection(); }, [copyMode]);
   const cwdRef = useRef(session.cwd);
   const hoverTimer = useRef<number | null>(null);
   const hoverUrl = useRef<string | null>(null);
@@ -59,6 +66,9 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
   const hoverGeneration = useRef(0);
   const previewGeneration = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const copyText = useCallback((text: string) => {
+    void writeClipboardText(text).then(() => setNotice(`已复制 ${Array.from(text).length} 个字符`)).catch(error => setNotice(`复制失败：${errorText(error)}`));
+  }, [setNotice]);
   useEffect(() => { cwdRef.current = session.cwd; }, [session.cwd]);
   const revokeHover = useCallback(() => { hoverGeneration.current++; if (hoverTimer.current !== null) clearTimeout(hoverTimer.current); hoverTimer.current = null; if (hoverUrl.current) URL.revokeObjectURL(hoverUrl.current); hoverUrl.current = null; setHover(null); }, []);
   const revokePreview = useCallback(() => { previewGeneration.current++; if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); previewUrl.current = null; setPreview(null); }, []);
@@ -105,11 +115,11 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
     const responses = suppressTerminalResponses(term);
     const clipboard = enableTerminalClipboard(term, {
       canWrite: () => !disposed && liveOutput && activeRef.current && !document.hidden && document.hasFocus(),
-      writeText: text => navigator.clipboard.writeText(text),
+      writeText: writeClipboardText,
       onError: error => setNotice(`终端复制失败：${errorText(error)}`),
     });
     const fit = new FitAddon(); term.loadAddon(fit); term.open(terminalHost.current); termRef.current = term;
-    const selection = preferTextSelection(term);
+    const selection = preferTextSelection(term, () => interactionModeRef.current === 'local');
     const scrolling = preferScrollback(term);
     // 让浏览器产生带图片数据的 paste 事件，不把 Ctrl+V 编码成远端的 ^V。
     term.attachCustomKeyEventHandler(event => {
@@ -149,9 +159,14 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
       } else if (!terminalReport) setNotice('连接未就绪，输入未发送');
     };
     const inputDisposable = term.onData(send);
-    const touchScroll = enableTouchScroll(term, data => {
-      if (!disposed && activeRef.current && readyRef.current && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage));
+    const touch = enableTouchInteraction(term, {
+      selectionMode: () => interactionModeRef.current,
+      copyMode: () => copyModeRef.current,
+      onCancelCopy: () => setCopyMode(false),
+      sendScrollInput: data => { if (!disposed && activeRef.current && readyRef.current && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'input', data } satisfies ClientMessage)); },
+      copyText,
     });
+    cancelTouchRef.current = touch.cancel;
     const provider = pathLinkProvider(term, { base: row => lineBases.get(row) ?? '', activate: (path, base) => { revokeHover(); void inspect(path, base, 'preview'); }, hover: (path, base, point) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); }, leave: revokeHover });
     const linkDisposable = term.registerLinkProvider(provider);
     const connect = () => {
@@ -210,8 +225,8 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
       });
     };
     connect();
-    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); selection.dispose(); scrolling.dispose(); touchScroll.dispose(); geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
-  }, [sessionId, token, inspect, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable]);
+    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); selection.dispose(); scrolling.dispose(); touch.dispose(); cancelTouchRef.current = () => {}; geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
+  }, [sessionId, token, inspect, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable, copyText]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -250,6 +265,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
     const id = sessionId;
     if (!id || !draft.trim()) return;
     const text = draft;
+    const sentUploadId = uploadId.current;
     sendingRef.current = true; setSending(true);
     try {
       await uploadQueue.current;
@@ -259,6 +275,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
       if (socket.current?.readyState === WebSocket.OPEN) {
         claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text, submit: true } satisfies ClientMessage));
         setDraft(value => value === text ? '' : value); draftInput.current?.focus();
+        setUploads(items => items.filter(item => item.id > sentUploadId));
       }
     } finally { sendingRef.current = false; if (mounted.current) setSending(false); }
   };
@@ -269,7 +286,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
 
   useEffect(() => {
     if (active) activateRef.current();
-    else { revokeHover(); termRef.current?.blur(); composing.current = false; }
+    else { revokeHover(); termRef.current?.blur(); composing.current = false; copyModeRef.current = false; setCopyMode(false); cancelTouchRef.current(); }
   }, [active, revokeHover]);
 
   return <div className="content session-pane" hidden={!active} data-session-id={sessionId}><div className="terminal-pane"><div className="terminal-wrap" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}><div ref={terminalHost} className="terminal-host" /></div><div className="composer-dock"><div className="composer-panel" onPasteCapture={onPaste} onDrop={onDrop} onDragOver={e => e.preventDefault()}>
@@ -284,6 +301,7 @@ export function SessionPane({ session, token, active, fontFamily, maxUploadBytes
             <span className="composer-divider" />
             <button title="发送 Esc" disabled={status !== '已连接'} onPointerDown={e => e.preventDefault()} onClick={() => sendKey('\x1b')}>Esc</button>
             <button title="中断当前程序（Ctrl+C）" aria-label="中断当前程序" disabled={status !== '已连接'} onPointerDown={e => e.preventDefault()} onClick={() => sendKey('\x03')}>Ctrl C</button>
+            <button className="copy-mode-toggle" title={copyMode ? '退出复制模式，恢复手指滚屏' : '进入复制模式，手指拖动选字'} aria-label="复制模式" aria-pressed={copyMode} onPointerDown={e => e.preventDefault()} onClick={() => setCopyMode(value => !value)}>{copyMode ? '退出复制' : '复制'}</button>
           </div>
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
           <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onPointerDown={e => e.preventDefault()} onClick={() => void sendDraft()} disabled={!draft.trim() || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>

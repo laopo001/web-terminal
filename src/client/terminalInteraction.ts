@@ -26,7 +26,7 @@ export function preferScrollback(term: Terminal) {
 }
 
 /** 应用鼠标模式交给 CLI 原生处理；Shift（Mac Option）保留 xterm 本地选择。 */
-export function preferTextSelection(term: Terminal) {
+export function preferTextSelection(term: Terminal, forceLocal: () => boolean = () => false) {
   const element = term.element!;
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   const previous = term.options.macOptionClickForcesSelection;
@@ -35,7 +35,7 @@ export function preferTextSelection(term: Terminal) {
     if ((event.target as Element).closest('.scrollbar')) return;
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || term.modes.mouseTrackingMode === 'none') return;
     // 本地历史没有对应的远端位置，点击和拖选只作用于本地。
-    if (term.buffer.active.viewportY < term.buffer.active.baseY) Object.defineProperty(event, mac ? 'altKey' : 'shiftKey', { value: true });
+    if (forceLocal() || term.buffer.active.viewportY < term.buffer.active.baseY) Object.defineProperty(event, mac ? 'altKey' : 'shiftKey', { value: true });
   };
   const preserveSelection = (event: MouseEvent) => {
     // ANY 悬停报告会被当作输入，既会清空本地选区，也会把本地历史滚回底部。

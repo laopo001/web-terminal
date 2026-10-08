@@ -8,22 +8,24 @@ async page => {
     const xterm = await import('/node_modules/.vite/deps/@xterm_xterm.js');
     const { preferTextSelection, preferScrollback } = await import('/src/client/terminalInteraction.ts');
     const { enableTerminalClipboard } = await import('/src/client/terminalClipboard.ts');
+    const { enableTouchInteraction } = await import('/src/client/terminalTouch.ts');
     document.getElementById('root').style.display = 'none';
     const host = document.createElement('div');
     host.style.cssText = 'width:900px;height:500px;padding:20px;background:#101821';
     document.body.appendChild(host);
     const Terminal = xterm.Terminal || xterm.default.Terminal;
-    window.__mouseTest = { host, Terminal, preferTextSelection, preferScrollback, enableTerminalClipboard };
+    window.__mouseTest = { host, Terminal, preferTextSelection, preferScrollback, enableTerminalClipboard, enableTouchInteraction };
   });
   const setup = async (mode, alternate = false) => {
     await page.evaluate(async ({ mode, alternate }) => {
       const test = window.__mouseTest;
-      test.selection?.dispose(); test.scrolling?.dispose(); test.clipboard?.dispose(); test.term?.dispose();
+      test.touch?.dispose(); test.selection?.dispose(); test.scrolling?.dispose(); test.clipboard?.dispose(); test.term?.dispose();
       test.host.replaceChildren();
       const term = test.term = new test.Terminal({ cols: 80, rows: 24, fontSize: 16, fontFamily: 'Consolas, monospace', allowProposedApi: true });
       term.open(test.host);
       test.selection = test.preferTextSelection(term); test.scrolling = test.preferScrollback(term);
       test.sent = []; test.copied = []; test.errors = []; test.live = true; test.active = true;
+      test.touch = test.enableTouchInteraction(term, { copyMode: () => false, sendScrollInput: data => test.sent.push(data), copyText: text => test.copied.push(text) });
       test.clipboard = test.enableTerminalClipboard(term, {
         canWrite: () => test.live && test.active,
         writeText: async text => { test.copied.push(text); },
@@ -104,6 +106,6 @@ async page => {
     await new Promise(resolve => test.term.write('\x1b]52;c;?\x07', resolve));
   });
   check(await page.evaluate(() => window.__mouseTest.copied.length === 0), '快照、隐藏会话或查询触发了剪贴板写入');
-  await page.evaluate(() => { const test = window.__mouseTest; test.selection.dispose(); test.scrolling.dispose(); test.clipboard.dispose(); test.term.dispose(); });
+  await page.evaluate(() => { const test = window.__mouseTest; test.touch.dispose(); test.selection.dispose(); test.scrolling.dispose(); test.clipboard.dispose(); test.term.dispose(); });
   return { cases: results, chineseSelection: true, localHistorySafe: true, clipboardGuards: true };
 }
