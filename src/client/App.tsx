@@ -11,11 +11,13 @@ import { useVisualViewport } from './useVisualViewport';
 import { SettingsDialog } from './SettingsDialog';
 import { defaultTerminalFont } from './terminalFont';
 import { loadClientSettings, saveClientSettings } from './clientSettings';
+import { useInputFocusPolicy } from './inputFocus';
 
 const tokenKey = 'web-terminal.token';
 
 export default function App() {
   useVisualViewport();
+  useInputFocusPolicy();
   const [settings, setSettings] = useState(loadClientSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const defaultFont = defaultTerminalFont(navigator.platform);

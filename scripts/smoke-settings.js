@@ -11,8 +11,8 @@ async page => {
     window.__settingsSockets = [];
     const Native = window.WebSocket;
     window.WebSocket = class extends Native {
-      constructor(...args) { super(...args); this.entry = { socket: this, id: null, sent: [] }; window.__settingsSockets.push(this.entry); }
-      send(data) { try { const m = JSON.parse(data); if (m.type === 'auth') this.entry.id = m.sessionId; this.entry.sent.push(m); } catch {} super.send(data); }
+      constructor(...args) { super(...args); this.settingsEntry = { socket: this, id: null, sent: [] }; window.__settingsSockets.push(this.settingsEntry); }
+      send(data) { try { const m = JSON.parse(data); if (m.type === 'auth') this.settingsEntry.id = m.sessionId; this.settingsEntry.sent.push(m); } catch {} super.send(data); }
     };
   });
   await page.setViewportSize({ width: 1000, height: 900 });
