@@ -44,6 +44,26 @@ jobs:
       - run: pnpm package:vscode
       - name: Pack npm package
         run: npm pack --pack-destination release
+      - name: Verify npm trusted publisher
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const { name } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const tokenUrl = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          tokenUrl.searchParams.set('audience', 'npm:registry.npmjs.org');
+          const oidc = await fetch(tokenUrl, {
+            headers: { Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+          });
+          assert.equal(oidc.status, 200, 'GitHub OIDC token request failed');
+          const { value } = await oidc.json();
+          const exchange = await fetch(`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(name)}`, {
+            method: 'POST', headers: { Authorization: `Bearer ${value}` },
+          });
+          assert.equal(exchange.status, 201, 'npm trusted publisher token exchange failed');
+          await exchange.body.cancel();
+          console.log('GitHub OIDC 与 npm 可信发布关系验证通过');
+          JS
       - uses: actions/upload-artifact@v7
         with:
           name: release-packages
