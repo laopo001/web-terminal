@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
-import { mkdir, readdir, open, realpath, rename, unlink } from 'node:fs/promises';
+import { mkdir, readdir, open, realpath, unlink, writeFile, appendFile, readFile, rm } from 'node:fs/promises';
 import { resolve, basename, dirname, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { parse, stringify } from 'yaml';
 import sharp from 'sharp';
 import type { Config } from './config.ts';
 import type { DirectoryListing, FileInfo } from '../shared/protocol.ts';
@@ -60,12 +61,30 @@ export class Files {
       if (!meta.width || !meta.height) throw new HttpError(415, '图片无法解码');
       const folder = join(this.config.dataDir, 'uploads', sessionId);
       await mkdir(folder, { recursive: true, mode: 0o700 });
+      await mkdir(this.config.uploadDir, { recursive: true, mode: 0o700 });
       const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' }[mime];
       // 使用无空格、无控制字符的路径，避免 CLI 路径粘贴歧义。
-      const path = join(folder, `${randomUUID()}${ext}`);
-      await rename(temporary, path);
+      let path: string;
+      for (;;) {
+        path = join(this.config.uploadDir, `${randomBytes(6).toString('hex')}${ext}`);
+        try { await writeFile(path, bytes, { flag: 'wx', mode: 0o600 }); break; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      }
+      // 归属记录留在会话目录，服务重启后仍能只清理本会话的图片。
+      try { await appendFile(join(folder, 'files.yaml'), stringify([path]), { mode: 0o600 }); }
+      catch (error) { await unlink(path); throw error; }
       return { path, name: basename(originalName).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 160) || basename(path), size: bytes.length, mime, isImage: true, width: meta.width, height: meta.height } satisfies FileInfo;
     } finally { await unlink(temporary).catch(() => {}); }
+  }
+  async removeUploads(sessionId: string) {
+    const folder = join(this.config.dataDir, 'uploads', sessionId);
+    let paths: unknown;
+    try { paths = parse(await readFile(join(folder, 'files.yaml'), 'utf8')); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    if (Array.isArray(paths)) {
+      await Promise.all(paths.filter((path): path is string => typeof path === 'string' && /^[a-f0-9]{12}\.(?:png|jpg|webp|gif)$/.test(basename(path))).map(path => rm(path, { force: true })));
+    }
+    await rm(folder, { recursive: true, force: true });
   }
 }
 function imageMime(bytes: Buffer): 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif' | undefined {

@@ -1,5 +1,4 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { parse, stringify } from 'yaml';
@@ -181,7 +180,7 @@ export class Sessions {
     for (const ws of session.clients.keys()) ws.close(1000, '会话已结束');
     this.entries.delete(id); this.save();
     await session.screen.dispose();
-    await rm(join(this.config.dataDir, 'uploads', id), { recursive: true, force: true });
+    await this.files.removeUploads(id);
   }
   async shutdown() {
     this.shuttingDown = true; this.save();

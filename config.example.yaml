@@ -5,3 +5,5 @@ port: 3840
 # defaultCwd: /home/yourname/projects
 # shell: /bin/zsh
 dataDir: .data
+# 图片默认保存在 ~/.web-terminal/uploads，可指定其他目录。
+# uploadDir: /home/yourname/.web-terminal/uploads

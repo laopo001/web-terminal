@@ -33,7 +33,7 @@ async function main() {
   process.env.WEB_TERMINAL_CONFIG = configFile;
   // 全局安装不依赖客户端的工作目录，配置中的相对路径以配置文件目录为准。
   process.chdir(dirname(configFile));
-  const config = loadConfig({ dataDir: join(paths.directory, 'data') });
+  const config = loadConfig({ dataDir: join(paths.directory, 'data'), uploadDir: join(paths.base, 'uploads') });
   // CLI 的连接地址是管理目标，优先于配置文件或继承的 PORT/HOST。
   config.host = new URL(url).hostname === 'localhost' ? '127.0.0.1' : new URL(url).hostname.replace(/^\[|\]$/g, '');
   config.port = Number(new URL(url).port || 80);

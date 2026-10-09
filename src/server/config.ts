@@ -5,10 +5,10 @@ import { randomBytes, createHash } from 'node:crypto';
 import { parse } from 'yaml';
 
 export interface Config {
-  host: string; port: number; dataDir: string; token: string;
+  host: string; port: number; dataDir: string; uploadDir: string; token: string;
   defaultCwd: string; shell: string; machineId: string; maxUploadBytes: number;
 }
-export function loadConfig(defaults: { configFile?: string; dataDir?: string } = {}): Config {
+export function loadConfig(defaults: { configFile?: string; dataDir?: string; uploadDir?: string } = {}): Config {
   const configFile = resolve(process.env.WEB_TERMINAL_CONFIG || defaults.configFile || 'config.yaml');
   const raw = existsSync(configFile) ? parse(readFileSync(configFile, 'utf8')) : {};
   if (raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) throw new Error('config.yaml 必须是配置对象');
@@ -25,8 +25,10 @@ export function loadConfig(defaults: { configFile?: string; dataDir?: string } =
   if (!token || token.length > 1024) throw new Error('token 不能为空，且最多 1024 个字符');
   const port = Number(process.env.PORT || input.port || 3840);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('port 无效');
+  const uploadHome = resolve(process.env.WEB_TERMINAL_HOME || resolve(homedir(), '.web-terminal'));
   return {
     host: String(process.env.HOST || input.host || '127.0.0.1'), port, dataDir, token,
+    uploadDir: resolve(input.uploadDir || defaults.uploadDir || resolve(uploadHome, 'uploads')),
     defaultCwd: realpathSync(resolve(input.defaultCwd || homedir())),
     shell: String(input.shell || process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash')),
     machineId: `${hostname()}-${createHash('sha256').update(dataDir).digest('hex').slice(0, 8)}`,

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile, symlink, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
@@ -13,7 +13,7 @@ import type { Config } from '../src/server/config.ts';
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'web-terminal-test-'));
   const workspace = join(root, 'workspace'); await mkdir(workspace);
-  const config: Config = { host: '127.0.0.1', port: 0, dataDir: join(root, 'data'), token: randomUUID(), defaultCwd: workspace, shell: '/bin/bash', machineId: randomUUID(), maxUploadBytes: 20 * 1024 * 1024 };
+  const config: Config = { host: '127.0.0.1', port: 0, dataDir: join(root, 'data'), uploadDir: join(root, 'uploads'), token: randomUUID(), defaultCwd: workspace, shell: '/bin/bash', machineId: randomUUID(), maxUploadBytes: 20 * 1024 * 1024 };
   let runtime = await createApp(config, { staticFiles: false });
   async function listen() { runtime.server.listen(0, '127.0.0.1'); await once(runtime.server, 'listening'); }
   await listen();
@@ -56,6 +56,8 @@ test('认证、文件上传和真实内容预览，支持上级目录与符号�
     const form = new FormData(); form.append('file', new Blob([new Uint8Array(png)], { type: 'image/png' }), '截图.png');
     const uploaded = await f.api(`/api/sessions/${id}/uploads`, { method: 'POST', body: form });
     assert.equal(uploaded.status, 201); const image = await uploaded.json();
+    assert.equal(dirname(image.path), f.config.uploadDir);
+    assert.match(basename(image.path), /^[a-f0-9]{12}\.png$/);
     assert.equal(image.width, 64); assert.equal(image.height, 32);
     assert.equal((await stat(image.path)).mode & 0o777, 0o600);
     const endpoint = `/api/sessions/${id}/files/`;
@@ -78,6 +80,36 @@ test('认证、文件上传和真实内容预览，支持上级目录与符号�
     const text = await f.api(endpoint + 'content?path=hello.txt');
     assert.match(text.headers.get('content-disposition')!, /attachment/);
     assert.equal(await text.text(), 'hello');
+  } finally { await f.close(); }
+});
+
+test('短路径图片跨会话不覆盖，重启后按归属清理并兼容旧图片', async () => {
+  const f = await fixture();
+  try {
+    const create = async () => (await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json()).id as string;
+    const first = await create(), second = await create();
+    const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#123456' } }).png().toBuffer();
+    const upload = async (id: string) => {
+      const form = new FormData(); form.append('file', new Blob([new Uint8Array(png)]), '../同名.png');
+      const response = await f.api(`/api/sessions/${id}/uploads`, { method: 'POST', body: form });
+      assert.equal(response.status, 201);
+      return (await response.json()).path as string;
+    };
+    const paths = await Promise.all([upload(first), upload(first), upload(second)]);
+    assert.equal(new Set(paths).size, 3);
+    const legacyFolder = join(f.config.dataDir, 'uploads', first);
+    const legacyPath = join(legacyFolder, `${randomUUID()}.png`);
+    await writeFile(legacyPath, png);
+    const unrelated = join(f.config.uploadDir, 'keep.png'); await writeFile(unrelated, png);
+    await f.restart();
+    for (const path of [...paths.slice(0, 2), legacyPath]) {
+      const response = await f.api(`/api/sessions/${first}/files/content?path=${encodeURIComponent(path)}`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+    }
+    assert.equal((await f.api(`/api/sessions/${first}`, { method: 'DELETE' })).status, 200);
+    for (const path of [...paths.slice(0, 2), legacyPath, legacyFolder]) await assert.rejects(stat(path), { code: 'ENOENT' });
+    assert.ok(await stat(paths[2])); assert.ok(await stat(unrelated));
   } finally { await f.close(); }
 });
 

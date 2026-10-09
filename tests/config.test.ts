@@ -16,6 +16,9 @@ test('读取用户指定的非空短令牌，仍拒绝空令牌文件', () => {
     writeFileSync(join(dir, 'config.yaml'), '{}\n');
     writeFileSync(join(dir, 'token'), '123456\n');
     assert.equal(loadConfig().token, '123456');
+    assert.equal(loadConfig({ uploadDir: join(dir, 'uploads') }).uploadDir, join(dir, 'uploads'));
+    writeFileSync(join(dir, 'config.yaml'), 'uploadDir: custom-uploads\n');
+    assert.equal(loadConfig({ uploadDir: join(dir, 'uploads') }).uploadDir, join(process.cwd(), 'custom-uploads'));
     writeFileSync(join(dir, 'token'), '  \n');
     assert.throws(() => loadConfig(), /不能为空/);
   } finally {
