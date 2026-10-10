@@ -3,8 +3,29 @@ import assert from 'node:assert/strict';
 import headless from '@xterm/headless';
 import { TerminalScreen } from '../src/server/terminalScreen.ts';
 import { EscapeTail } from '../src/server/escapeTail.ts';
+import type { TerminalProgress } from '../src/shared/protocol.ts';
 const write = (term: headless.Terminal, data: string) => new Promise<void>(resolve => term.write(data, resolve));
 const text = (term: headless.Terminal) => Array.from({ length: term.buffer.active.length }, (_, i) => term.buffer.active.getLine(i)?.translateToString(true));
+
+test('OSC 9;4 支持分块、BEL/ST、进度状态、清除和终端重置', async () => {
+  const progress: (TerminalProgress | undefined)[] = [], titles: string[] = [];
+  const screen = new TerminalScreen(title => titles.push(title), () => {}, value => progress.push(value));
+  try {
+    await screen.write('\x1b]9;4;1;', () => {});
+    assert.equal(progress.length, 0);
+    await screen.write('35\x07', () => {});
+    assert.deepEqual(progress.at(-1), { state: 1, value: 35 });
+    await screen.write('\x1b]9;4;2\x1b\\\x1b]9;4;3;90\x07\x1b]9;4;4;120\x07', () => {});
+    assert.deepEqual(progress.slice(-3), [{ state: 2, value: 35 }, { state: 3, value: 35 }, { state: 4, value: 100 }]);
+    const count = progress.length;
+    await screen.write('\x1b]9;通知\x07\x1b]9;4;9;50\x07\x1b]9;4;1;bad\x07\x1b]9;4;1;-1\x07\x1b]2;⠋ 任意 CLI\x07', () => {});
+    assert.equal(progress.length, count); assert.deepEqual(titles, ['⠋ 任意 CLI']);
+    await screen.write('\x1b]9;4;0\x07', () => {}); assert.equal(progress.at(-1), undefined);
+    await screen.write('\x1b]9;4;1\x07', () => {}); assert.deepEqual(progress.at(-1), { state: 1, value: 0 });
+    await screen.write('\x1bc', () => {}); assert.equal(progress.at(-1), undefined);
+    assert(!text(screen.terminal).some(line => line?.includes('4;')));
+  } finally { await screen.dispose(); }
+});
 
 test('快照保持全屏、中文、样式、光标、输入模式，清除的文字不会回放', async () => {
   const titles: string[] = [], replies: string[] = [];

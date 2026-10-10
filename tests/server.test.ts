@@ -101,6 +101,31 @@ test('后端统一推送运行与输出状态，未打开终端的设备和重�
   } finally { for (const socket of sockets) socket.terminate(); await f.close(); }
 });
 
+test('原生进度独立于输出活动，无 PTY 客户端和重连时仍同步，退出时清除', async () => {
+  const f = await fixture();
+  const sockets: WebSocket[] = [];
+  try {
+    const observer = await watchSessions(f.url(), f.config.token); sockets.push(observer.ws);
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const terminal = await connect(f.url(), f.config.token, id); sockets.push(terminal.ws);
+    terminal.send("printf '\\033]9;4;1;35\\a'\r");
+    await observer.waitFor(list => list.some(s => s.id === id && s.progress?.state === 1 && s.progress.value === 35));
+    terminal.ws.terminate();
+    await observer.waitFor(list => list.some(s => s.id === id && s.progress?.value === 35 && !s.outputActive));
+    assert.equal(f.runtime.sessions.get(id).clients.size, 0);
+    const reconnected = await watchSessions(f.url(), f.config.token); sockets.push(reconnected.ws);
+    assert.deepEqual(reconnected.updates[0].find(s => s.id === id).progress, { state: 1, value: 35 });
+    assert.deepEqual((await (await f.api('/api/sessions')).json()).find((s: any) => s.id === id).progress, { state: 1, value: 35 });
+    const resumed = await connect(f.url(), f.config.token, id); sockets.push(resumed.ws);
+    resumed.send("printf '\\033]9;4;0\\a'\r");
+    await observer.waitFor(list => list.some(s => s.id === id && !s.progress));
+    resumed.send("printf '\\033]9;4;3\\a'\r");
+    await observer.waitFor(list => list.some(s => s.id === id && s.progress?.state === 3 && !s.outputActive));
+    resumed.send('exit\r');
+    await observer.waitFor(list => list.some(s => s.id === id && !s.running && !s.progress && !s.outputActive));
+  } finally { for (const socket of sockets) socket.terminate(); await f.close(); }
+});
+
 test('会话状态订阅需鉴权且不能写入终端，重启后不恢复运行或输出状态', async () => {
   const f = await fixture();
   const sockets: WebSocket[] = [];

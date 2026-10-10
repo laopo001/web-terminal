@@ -1,6 +1,7 @@
 import { EscapeTail } from './escapeTail.ts';
 import headless from '@xterm/headless';
 import serialize from '@xterm/addon-serialize';
+import type { TerminalProgress } from '../shared/protocol.ts';
 
 /** 当前画面是恢复依据，原始输出仅在连接期间增量传输。 */
 export class TerminalScreen {
@@ -12,10 +13,25 @@ export class TerminalScreen {
   private cursorVisible = true;
   private mouseEncoding = 0;
   private margins: [number, number] = [1, 30];
-  constructor(onTitle: (title: string) => void, onResponse: (data: string) => void) {
+  private progress?: TerminalProgress;
+  constructor(onTitle: (title: string) => void, onResponse: (data: string) => void, onProgress: (progress: TerminalProgress | undefined) => void = () => {}) {
     this.terminal.loadAddon(this.serializer);
     this.terminal.onTitleChange(title => onTitle(title.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 512)));
     this.terminal.onData(onResponse);
+    const setProgress = (progress: TerminalProgress | undefined) => { this.progress = progress; onProgress(progress); };
+    this.terminal.parser.registerOscHandler(9, data => {
+      if (!data.startsWith('4;')) return false;
+      const match = /^4;([0-4])(?:;(\d+))?$/.exec(data);
+      if (!match) return true;
+      const state = Number(match[1]) as 0 | TerminalProgress['state'];
+      if (state === 0) setProgress(undefined);
+      else {
+        const previous = this.progress?.value ?? 0;
+        const value = state === 3 ? previous : match[2] !== undefined ? Math.min(100, Number(match[2])) : state === 1 ? 0 : previous;
+        setProgress({ state, value });
+      }
+      return true;
+    });
     for (const [code, color] of [[10, 'd8d8/e3e3/e8e8'], [11, '1010/1818/2121']] as const) {
       this.terminal.parser.registerOscHandler(code, data => {
         if (data !== '?') return false;
@@ -32,7 +48,7 @@ export class TerminalScreen {
       if (top < bottom && bottom <= this.terminal.rows) this.margins = [top, bottom];
       return false;
     });
-    this.terminal.parser.registerEscHandler({ final: 'c' }, () => { this.cursorVisible = true; this.mouseEncoding = 0; this.margins = [1, this.terminal.rows]; return false; });
+    this.terminal.parser.registerEscHandler({ final: 'c' }, () => { this.cursorVisible = true; this.mouseEncoding = 0; this.margins = [1, this.terminal.rows]; setProgress(undefined); return false; });
   }
   run(operation: () => void | Promise<void>): Promise<void> {
     const task = this.queue.then(() => { if (!this.closed) return operation(); });

@@ -41,7 +41,11 @@ export class Sessions {
   }
   private makeSession(info: SessionInfo): Session {
     const session: Session = { info, clients: new Map(), pendingBytes: 0, screen: new TerminalScreen(
-      title => { if (info.title !== title) { info.title = title; this.publish(); } }, data => session.process?.write(data)) };
+      title => { if (info.title !== title) { info.title = title; this.publish(); } }, data => session.process?.write(data),
+      progress => {
+        if (info.progress?.state === progress?.state && info.progress?.value === progress?.value) return;
+        info.progress = progress; this.publish();
+      }) };
     return session;
   }
   private save() {
@@ -147,7 +151,7 @@ export class Sessions {
       session.process = undefined;
       if (this.shuttingDown) return;
       void session.screen.run(() => {
-        session.info.running = false; this.stopActivity(session); this.save(); this.publish();
+        session.info.running = false; session.info.progress = undefined; this.stopActivity(session); this.save(); this.publish();
         for (const ws of session.clients.keys()) { send(ws, { type: 'exit', exitCode }); ws.close(4404, '会话已结束'); }
         session.clients.clear(); session.controller = undefined;
       });

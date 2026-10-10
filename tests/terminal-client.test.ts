@@ -15,12 +15,14 @@ test('浏览器不重复回答终端查询，输入模式照常更新', async ()
   guard.dispose(); term.dispose();
 });
 
-test('标题使用 CLI 对话名，排除启动命令和重复文件夹', () => {
+test('标题采用 OSC 原文，保留动画字符并支持任意 CLI', () => {
   const base = { id: 'test', name: '终端', cwd: '/home/me/project', createdAt: '', running: true };
-  assert.equal(sessionLabel({ ...base, processName: 'claude', title: 'DISABLE_AUTOUPDATER=1 claude --name test' }).name, 'claude');
-  assert.equal(sessionLabel({ ...base, processName: 'codex', title: '⠋ 实现图片预览 | project' }).name, '实现图片预览');
-  assert.equal(sessionLabel({ ...base, processName: 'codex', title: '⠋ project' }).name, 'codex');
-  assert.equal(sessionLabel({ ...base, processName: 'zsh', title: '遗留对话标题' }).name, 'zsh');
+  assert.equal(sessionLabel({ ...base, processName: 'claude', title: 'DISABLE_AUTOUPDATER=1 claude --name test' }).name, 'DISABLE_AUTOUPDATER=1 claude --name test');
+  assert.equal(sessionLabel({ ...base, processName: 'codex', title: '⠋ 实现图片预览 | project' }).name, '⠋ 实现图片预览 | project');
+  assert.equal(sessionLabel({ ...base, processName: 'codex', title: '⠋ project' }).name, '⠋ project');
+  assert.equal(sessionLabel({ ...base, processName: 'some-cli', title: '⠋ 正在构建' }).name, '⠋ 正在构建');
+  assert.equal(sessionLabel({ ...base, processName: 'zsh', title: 'Shell 提供的标题' }).name, 'Shell 提供的标题');
+  assert.equal(sessionLabel({ ...base, processName: 'some-cli' }).name, 'some-cli');
   assert.equal(sessionLabel({ ...base, processName: 'claude', title: '终端画面验证' }).agent, 'claude');
 });
 

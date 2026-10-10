@@ -121,7 +121,7 @@ pnpm electron
 pnpm package:electron:win
 ```
 
-开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.4-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
+开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.5-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
 
 浏览器、VS Code、Electron 各自首次在同一 Web 登录页输入 token，验证后保存在各自 Webview 的持久 localStorage 中。客户端配置不保存 token。Electron 远程页面开启 sandbox/contextIsolation、关闭 Node 集成；VS Code 通过专用 `/?embed=vscode` 入口加载，普通入口仍禁止 iframe 嵌入。
 

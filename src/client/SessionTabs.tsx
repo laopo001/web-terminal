@@ -4,17 +4,13 @@ import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type S
 import { useSessionGroups } from './useSessionGroups';
 import { SessionGroupDialog } from './SessionGroupDialog';
 import { TabMenu, type TabMenuPosition } from './TabMenu';
+import { TerminalProgressIndicator } from './TerminalProgressIndicator';
 
 export function sessionLabel(session: SessionInfo) {
   const command = session.processName?.replace(/^.*\//, '') || '';
   const agent = /^(codex|claude)(?:$|[-.])/i.exec(command)?.[1]?.toLowerCase();
   const folder = session.cwd.replace(/\/+$/, '').split('/').pop() || '/';
-  let title = session.title?.replace(/^[\u2800-\u28ff]\s*/, '').trim();
-  if (title?.endsWith(` | ${folder}`)) title = title.slice(0, -folder.length - 3).trim();
-  // Shell 的标题经常包含整条命令；仅采用已识别 CLI 主动提供的会话标题。
-  const commandTitle = /^(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)*(?:exec\s+)?(?:\S*\/)?(?:codex|claude)(?:\s|$)/i.test(title || '');
-  const name = agent && title && title !== folder && !commandTitle && !title.toLowerCase().startsWith(command.toLowerCase())
-    ? title : command || session.name;
+  const name = session.title?.trim() || command || session.name;
   return { name, folder, agent };
 }
 
@@ -91,6 +87,7 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
       onContextMenu={event => sessionMenu(event, session, true)}>
       <button className="session-select" draggable aria-pressed={active} title={`${name}\n${session.cwd}\n${hint}\n拖动可排序，拖到组名加入分组`} onClick={() => onSelect(session.id)}>
         <span className={`dot ${state}${outputActive ? ' output-active' : ''}`} aria-label={outputActive ? '终端正在输出' : hint} />
+        {state === 'live' && session.progress && <TerminalProgressIndicator progress={session.progress} />}
         {agent && <span className={`command-icon ${agent}`} aria-label={agent}>{agent === 'claude' ? '✳' : '›_'}</span>}
         <strong>{name}</strong><small>{folder}</small>
       </button>

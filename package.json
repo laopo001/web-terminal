@@ -1,6 +1,6 @@
 {
   "name": "@dadigua/web-terminal",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "scripts": {
     "dev": "tsx src/server/index.ts --dev",

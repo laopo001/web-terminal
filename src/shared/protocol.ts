@@ -1,3 +1,9 @@
+/** CLI 通过 OSC 9;4 报告的进度；状态 0 对应清除 progress。 */
+export interface TerminalProgress {
+  state: 1 | 2 | 3 | 4;
+  value: number;
+}
+
 export interface SessionInfo {
   id: string;
   name: string;
@@ -7,6 +13,7 @@ export interface SessionInfo {
   createdAt: string;
   running: boolean;
   outputActive?: boolean;
+  progress?: TerminalProgress;
 }
 export interface ServerInfo {
   machineId: string;

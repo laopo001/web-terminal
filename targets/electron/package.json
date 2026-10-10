@@ -1,7 +1,7 @@
 {
   "name": "web-terminal-client",
   "productName": "Web Terminal",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Web Terminal 的轻量桌面客户端",
   "author": "Web Terminal",
   "private": true,
