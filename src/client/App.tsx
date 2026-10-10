@@ -28,6 +28,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [info, setInfo] = useState<ServerInfo | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [visited, setVisited] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<Record<string, string>>({});
@@ -51,6 +52,7 @@ export default function App() {
   const logout = useCallback(() => {
     localStorage.removeItem(tokenKey); setToken(null); setSessions([]); setSelected(null);
     setVisited([]); setStatuses({}); setActivities({}); setPendingClose(null); setCloseError('');
+    setSessionsLoaded(false);
   }, []);
   const handleApiError = useCallback((error: unknown, message: string) => { if (error instanceof UnauthorizedError) logout(); else setNotice(`${message}：${errorText(error)}`); }, [logout, setNotice]);
   useEffect(() => {
@@ -80,13 +82,13 @@ export default function App() {
     if (!token) return;
     let active = true;
     Promise.all([api<ServerInfo>(token, '/api/info'), api<SessionInfo[]>(token, '/api/sessions')]).then(([server, list]) => {
-      if (!active) return; setReachable(true); setInfo(server); setSessions(list); setSelected(old => old && list.some(s => s.id === old) ? old : null);
+      if (!active) return; setReachable(true); setInfo(server); setSessions(list); setSessionsLoaded(true); setSelected(old => old && list.some(s => s.id === old) ? old : null);
     }).catch(error => { if (active) handleApiError(error, '加载失败'); });
     return () => { active = false; };
   }, [token, handleApiError]);
   useEffect(() => {
     if (!token) return;
-    const sync = () => { void api<SessionInfo[]>(token, '/api/sessions').then(list => { setReachable(true); setSessions(list); setSelected(old => old && list.some(s => s.id === old) ? old : null); }).catch(error => { setReachable(false); if (error instanceof UnauthorizedError) logout(); }); };
+    const sync = () => { void api<SessionInfo[]>(token, '/api/sessions').then(list => { setReachable(true); setSessions(list); setSessionsLoaded(true); setSelected(old => old && list.some(s => s.id === old) ? old : null); }).catch(error => { setReachable(false); if (error instanceof UnauthorizedError) logout(); }); };
     const timer = window.setInterval(sync, 5000); return () => clearInterval(timer);
   }, [token, handleApiError]);
   const current = sessions.find(s => s.id === selected);
@@ -106,7 +108,7 @@ export default function App() {
   if (authChecking) return <main className="auth-shell"><div className="auth-card"><span className="brand-mark">›_</span><h1>连接终端</h1><p>正在验证保存的访问令牌…</p></div></main>;
   if (!token) return <main className="auth-shell"><form className="auth-card" onSubmit={event => { event.preventDefault(); void login(authValue.trim() || localStorage.getItem(tokenKey) || ''); }}><span className="brand-mark">›_</span><h1>Web Terminal</h1><p>输入访问令牌，连接到你的工作空间。</p><label htmlFor="token">访问令牌</label><input id="token" type="password" autoComplete="off" value={authValue} onChange={e => setAuthValue(e.target.value)} placeholder={localStorage.getItem(tokenKey) ? '已保存令牌，可直接重试' : '粘贴访问令牌'} /><button className="primary" disabled={busy}>连接</button>{authError && <div className="error" role="alert">{authError}</div>}</form></main>;
   return <div className="app"><header className="tabs-bar">
-    <SessionTabs sessions={sessions} selected={selected} statuses={statuses} activities={activities} reachable={reachable} onSelect={selectSession} onClose={session => { setCloseError(''); setPendingClose(session); }} />
+    <SessionTabs sessions={sessions} selected={selected} statuses={statuses} activities={activities} reachable={reachable} onSelect={selectSession} onClose={session => { setCloseError(''); setPendingClose(session); }} sessionsReady={sessionsLoaded} onNotice={setNotice} />
     <div className="tab-actions"><button title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3h4l.5 3 2 .9 2.5-1.5 2 3.4-2 2.1v2.2l2 2.1-2 3.4-2.5-1.5-2 .9-.5 3h-4l-.5-3-2-.9-2.5 1.5-2-3.4 2-2.1v-2.2l-2-2.1 2-3.4 2.5 1.5 2-.9Z" /><circle cx="12" cy="12" r="3" /></svg></button><button title="创建会话" aria-label="创建会话" onClick={() => setCreating(value => !value)}>＋</button></div>
     {creating && <DirectoryPicker token={token} initialPath={workspaceFolders[0]?.path || current?.cwd || info?.defaultCwd || ''} home={info?.defaultCwd || ''} folders={workspaceFolders} busy={busy} onCreate={createSession} onClose={() => setCreating(false)} onUnauthorized={logout} />}
   </header><div className="workspace">

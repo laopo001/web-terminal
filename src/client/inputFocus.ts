@@ -17,8 +17,10 @@ export function useInputFocusPolicy() {
       if (isEditingField(target?.closest('input,textarea,[contenteditable]') ?? null)) return;
       const active = document.activeElement;
       const button = target?.closest('button');
+      // 桌面标签拖动需要浏览器默认的 pointerdown；触屏继续延后收起键盘。
+      const nativeDrag = target?.closest('[draggable="true"]') && event instanceof PointerEvent && event.pointerType !== 'touch';
       // 抬手产生 click 后再结束编辑，避免键盘提前收起改变按钮位置。
-      if (event.type === 'pointerdown' && button && !button.disabled && isEditingField(active)) {
+      if (event.type === 'pointerdown' && button && !button.disabled && isEditingField(active) && !nativeDrag) {
         event.preventDefault(); return;
       }
       if (button?.closest('[data-preserve-input-focus]')) return;
