@@ -13,6 +13,7 @@ import { Files, HttpError } from './files.ts';
 
 interface Session {
   info: SessionInfo; process?: pty.IPty; clients: Map<WebSocket, { cols: number; rows: number }>; controller?: WebSocket; screen: TerminalScreen; pendingBytes: number;
+  activityTimer?: ReturnType<typeof setTimeout>;
 }
 export function send(ws: WebSocket, message: ServerMessage) {
   if (ws.readyState !== 1) return;
@@ -22,6 +23,9 @@ export function send(ws: WebSocket, message: ServerMessage) {
 export class Sessions {
   private entries = new Map<string, Session>();
   private shuttingDown = false;
+  private watchers = new Set<WebSocket>();
+  private refreshTimer?: ReturnType<typeof setInterval>;
+  private refreshing = false;
   constructor(private config: Config, private files: Files) {
     const saved = join(config.dataDir, 'sessions.yaml');
     if (existsSync(saved)) {
@@ -30,14 +34,14 @@ export class Sessions {
       for (const record of records as SessionInfo[]) {
         if (!/^[a-f0-9-]{36}$/.test(record.id)) continue;
         const { id, name, cwd, createdAt } = record;
-        const info: SessionInfo = { id, name, cwd, createdAt, running: false };
+        const info: SessionInfo = { id, name, cwd, createdAt, running: false, outputActive: false };
         this.entries.set(info.id, this.makeSession(info));
       }
     }
   }
   private makeSession(info: SessionInfo): Session {
     const session: Session = { info, clients: new Map(), pendingBytes: 0, screen: new TerminalScreen(
-      title => { info.title = title; }, data => session.process?.write(data)) };
+      title => { if (info.title !== title) { info.title = title; this.publish(); } }, data => session.process?.write(data)) };
     return session;
   }
   private save() {
@@ -62,13 +66,44 @@ export class Sessions {
     return { ...session.info };
   }
   async list() { return Promise.all([...this.entries.keys()].map(id => this.current(id))); }
+  private publish(ws?: WebSocket) {
+    const message: ServerMessage = { type: 'sessions', sessions: [...this.entries.values()].map(session => ({ ...session.info })) };
+    if (ws) send(ws, message);
+    else for (const watcher of this.watchers) send(watcher, message);
+  }
+  watch(ws: WebSocket) {
+    this.watchers.add(ws);
+    this.publish(ws);
+    ws.once('close', () => {
+      this.watchers.delete(ws);
+      if (!this.watchers.size) { clearInterval(this.refreshTimer); this.refreshTimer = undefined; }
+    });
+    if (!this.refreshTimer) this.refreshTimer = setInterval(() => void this.refresh(), 5000);
+    void this.refresh();
+  }
+  private async refresh() {
+    if (this.refreshing || this.shuttingDown) return;
+    this.refreshing = true;
+    try { await this.list(); if (!this.shuttingDown) this.publish(); }
+    catch (error) { console.error('会话状态更新失败', error); }
+    finally { this.refreshing = false; }
+  }
+  private stopActivity(session: Session) {
+    clearTimeout(session.activityTimer); session.activityTimer = undefined;
+    session.info.outputActive = false;
+  }
+  private outputActivity(session: Session) {
+    clearTimeout(session.activityTimer);
+    if (!session.info.outputActive) { session.info.outputActive = true; this.publish(); }
+    session.activityTimer = setTimeout(() => { this.stopActivity(session); this.publish(); }, 800);
+  }
   async create(name?: unknown, cwd?: unknown) {
     if (this.entries.size >= 32) throw new HttpError(409, '最多保留 32 个会话，请结束不需要的会话');
     if (name !== undefined && (typeof name !== 'string' || name.length > 80)) throw new HttpError(400, '会话名称最多 80 字符');
     if (cwd !== undefined && typeof cwd !== 'string') throw new HttpError(400, '工作目录无效');
     const dir = await this.files.directory((cwd as string) || this.config.defaultCwd);
     const id = randomUUID();
-    const info: SessionInfo = { id, name: (name as string)?.trim() || `终端 ${this.entries.size + 1}`, cwd: dir, createdAt: new Date().toISOString(), running: true };
+    const info: SessionInfo = { id, name: (name as string)?.trim() || `终端 ${this.entries.size + 1}`, cwd: dir, createdAt: new Date().toISOString(), running: true, outputActive: false };
     const session = this.makeSession(info);
     try {
       this.entries.set(id, session);
@@ -78,6 +113,7 @@ export class Sessions {
       throw error;
     }
     this.save();
+    this.publish();
     return info;
   }
   private spawnTerminal(command: string, args: string[], cwd: string, cols: number, rows: number) {
@@ -97,6 +133,8 @@ export class Sessions {
     const terminalProcess = this.spawnTerminal(this.config.shell, shellArgs, session.info.cwd, 100, 30);
     session.process = terminalProcess;
     terminalProcess.onData(data => {
+      if (this.shuttingDown || this.entries.get(session.info.id) !== session) return;
+      if (data) this.outputActivity(session);
       session.pendingBytes += data.length;
       if (session.pendingBytes > 256 * 1024) terminalProcess.pause();
       void session.screen.write(data, () => {
@@ -109,7 +147,7 @@ export class Sessions {
       session.process = undefined;
       if (this.shuttingDown) return;
       void session.screen.run(() => {
-        session.info.running = false; this.save();
+        session.info.running = false; this.stopActivity(session); this.save(); this.publish();
         for (const ws of session.clients.keys()) { send(ws, { type: 'exit', exitCode }); ws.close(4404, '会话已结束'); }
         session.clients.clear(); session.controller = undefined;
       });
@@ -176,15 +214,21 @@ export class Sessions {
   }
   async remove(id: string) {
     const session = this.get(id);
+    this.stopActivity(session);
     session.process?.kill();
     for (const ws of session.clients.keys()) ws.close(1000, '会话已结束');
     this.entries.delete(id); this.save();
+    this.publish();
     await session.screen.dispose();
     await this.files.removeUploads(id);
   }
   async shutdown() {
     this.shuttingDown = true; this.save();
+    clearInterval(this.refreshTimer); this.refreshTimer = undefined;
+    for (const ws of this.watchers) ws.close(1012, '服务重启中');
+    this.watchers.clear();
     for (const session of this.entries.values()) {
+      this.stopActivity(session);
       for (const ws of session.clients.keys()) ws.close(1012, '服务重启中');
       session.process?.kill();
     }

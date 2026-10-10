@@ -43,6 +43,84 @@ async function connect(url: string, token: string, id: string, cols = 100, rows 
     }
   };
 }
+async function watchSessions(url: string, token: string) {
+  const ws = new WebSocket(url.replace('http', 'ws') + '/ws');
+  const updates: any[][] = [];
+  ws.on('message', raw => { const message = JSON.parse(raw.toString()); if (message.type === 'sessions') updates.push(message.sessions); });
+  await once(ws, 'open');
+  ws.send(JSON.stringify({ type: 'auth', protocol: 2, token, scope: 'sessions' }));
+  const waitFor = async (predicate: (sessions: any[]) => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!updates.length || !predicate(updates.at(-1)!)) {
+      if (Date.now() > deadline) throw new Error('会话状态推送超时');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+  };
+  await waitFor(() => true);
+  return { ws, updates, waitFor };
+}
+
+test('后端统一推送运行与输出状态，未打开终端的设备和重连设备保持一致', async () => {
+  const f = await fixture();
+  const sockets: WebSocket[] = [];
+  try {
+    const first = await watchSessions(f.url(), f.config.token), second = await watchSessions(f.url(), f.config.token);
+    sockets.push(first.ws, second.ws);
+    assert.deepEqual(first.updates[0], []);
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    await Promise.all([first.waitFor(list => list.some(s => s.id === id && s.running)), second.waitFor(list => list.some(s => s.id === id && s.running))]);
+    await first.waitFor(list => list.some(s => s.id === id && !s.outputActive));
+    // 状态订阅不占用 PTY 连接、尺寸控制权或修改默认尺寸。
+    const session = f.runtime.sessions.get(id);
+    assert.equal(session.clients.size, 0); assert.equal(session.controller, undefined);
+    assert.equal(session.screen.terminal.cols, 100);
+    const terminal = await connect(f.url(), f.config.token, id);
+    sockets.push(terminal.ws);
+    first.updates.length = 0; second.updates.length = 0;
+    terminal.send("sleep 1.2; for i in 1 2 3 4 5 6 7 8; do printf 'background-%s\\n' \"$i\"; sleep .2; done\r");
+    await first.waitFor(list => list.some(s => s.id === id && s.outputActive));
+    terminal.ws.terminate();
+    await Promise.all([first.waitFor(list => list.some(s => s.id === id && !s.outputActive)), second.waitFor(list => list.some(s => s.id === id && !s.outputActive))]);
+    // 清除输入回显的活动，验证脱离所有终端客户端后的真实后台输出。
+    first.updates.length = 0; second.updates.length = 0;
+    await Promise.all([first.waitFor(list => list.some(s => s.id === id && s.outputActive)), second.waitFor(list => list.some(s => s.id === id && s.outputActive))]);
+    assert.equal(session.clients.size, 0);
+    const reconnected = await watchSessions(f.url(), f.config.token); sockets.push(reconnected.ws);
+    assert.equal(reconnected.updates[0].find(s => s.id === id).outputActive, true);
+    assert.equal((await (await f.api('/api/sessions')).json()).find((s: any) => s.id === id).outputActive, true);
+    await Promise.all([first.waitFor(list => list.some(s => s.id === id && !s.outputActive)), second.waitFor(list => list.some(s => s.id === id && !s.outputActive))]);
+    assert.deepEqual(first.updates.at(-1), second.updates.at(-1));
+    const idleReconnect = await watchSessions(f.url(), f.config.token); sockets.push(idleReconnect.ws);
+    assert.equal(idleReconnect.updates[0].find(s => s.id === id).outputActive, false);
+    const exiting = await connect(f.url(), f.config.token, id); sockets.push(exiting.ws);
+    exiting.send('exit\r');
+    await Promise.all([first.waitFor(list => list.some(s => s.id === id && !s.running && !s.outputActive)), second.waitFor(list => list.some(s => s.id === id && !s.running && !s.outputActive))]);
+    first.updates.length = 0; second.updates.length = 0;
+    await f.api(`/api/sessions/${id}`, { method: 'DELETE' });
+    await Promise.all([first.waitFor(list => !list.some(s => s.id === id)), second.waitFor(list => !list.some(s => s.id === id))]);
+  } finally { for (const socket of sockets) socket.terminate(); await f.close(); }
+});
+
+test('会话状态订阅需鉴权且不能写入终端，重启后不恢复运行或输出状态', async () => {
+  const f = await fixture();
+  const sockets: WebSocket[] = [];
+  try {
+    const wrong = new WebSocket(f.url().replace('http', 'ws') + '/ws'); sockets.push(wrong);
+    await once(wrong, 'open'); const rejected = once(wrong, 'close');
+    wrong.send(JSON.stringify({ type: 'auth', protocol: 2, token: 'wrong', scope: 'sessions' }));
+    assert.equal((await rejected)[0], 4401);
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const observer = await watchSessions(f.url(), f.config.token); sockets.push(observer.ws);
+    const closed = once(observer.ws, 'close');
+    observer.ws.send(JSON.stringify({ type: 'input', data: 'exit\r' }));
+    assert.equal((await closed)[0], 4404);
+    assert.equal((await f.runtime.sessions.current(id)).running, true);
+    await f.restart();
+    const restored = await watchSessions(f.url(), f.config.token); sockets.push(restored.ws);
+    const info = restored.updates[0].find(s => s.id === id);
+    assert.equal(info.running, false); assert.equal(info.outputActive, false);
+  } finally { for (const socket of sockets) socket.terminate(); await f.close(); }
+});
 
 test('认证、文件上传和真实内容预览，支持上级目录与符号链接', async () => {
   const f = await fixture();

@@ -13,6 +13,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { defaultTerminalFont } from './terminalFont';
 import { loadClientSettings, saveClientSettings } from './clientSettings';
 import { useInputFocusPolicy } from './inputFocus';
+import { useSessions } from './useSessions';
 
 const tokenKey = 'web-terminal.token';
 
@@ -28,13 +29,8 @@ export default function App() {
   const [authValue, setAuthValue] = useState('');
   const [authError, setAuthError] = useState('');
   const [info, setInfo] = useState<ServerInfo | null>(null);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [visited, setVisited] = useState<string[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, string>>({});
-  const [activities, setActivities] = useState<Record<string, boolean>>({});
-  const [reachable, setReachable] = useState(true);
   const [notice, setNoticeState] = useState({ id: 0, text: '' });
   const setNotice = useCallback((text: string) => setNoticeState(previous => ({ id: previous.id + 1, text })), []);
   const clearNotice = useCallback(() => setNoticeState(previous => ({ ...previous, text: '' })), []);
@@ -50,19 +46,16 @@ export default function App() {
     setVisited(list => list.includes(id) ? list : [...list, id]);
     setSelected(id);
   }, []);
-  const onStatus = useCallback((id: string, status: string) => setStatuses(previous => previous[id] === status ? previous : { ...previous, [id]: status }), []);
-  const onActivity = useCallback((id: string, active: boolean) => setActivities(previous => !!previous[id] === active ? previous : { ...previous, [id]: active }), []);
   const logout = useCallback(() => {
-    localStorage.removeItem(tokenKey); setToken(null); setSessions([]); setSelected(null);
-    setVisited([]); setStatuses({}); setActivities({}); setPendingClose(null); setCloseError('');
-    setSessionsLoaded(false); setDismissedEndedSession(null);
+    localStorage.removeItem(tokenKey); setToken(null); setSelected(null);
+    setVisited([]); setPendingClose(null); setCloseError(''); setDismissedEndedSession(null);
   }, []);
   const handleApiError = useCallback((error: unknown, message: string) => { if (error instanceof UnauthorizedError) logout(); else setNotice(`${message}：${errorText(error)}`); }, [logout, setNotice]);
+  const { sessions, setSessions, loaded: sessionsLoaded, reachable } = useSessions(token, logout, handleApiError);
   useEffect(() => {
     const ids = new Set(sessions.map(session => session.id));
     setVisited(previous => previous.every(id => ids.has(id)) ? previous : previous.filter(id => ids.has(id)));
-    setStatuses(previous => Object.keys(previous).every(id => ids.has(id)) ? previous : Object.fromEntries(Object.entries(previous).filter(([id]) => ids.has(id))));
-    setActivities(previous => Object.keys(previous).every(id => ids.has(id)) ? previous : Object.fromEntries(Object.entries(previous).filter(([id]) => ids.has(id))));
+    setSelected(previous => previous && !ids.has(previous) ? null : previous);
   }, [sessions]);
   useEffect(() => {
     const saved = localStorage.getItem(tokenKey);
@@ -84,21 +77,16 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     let active = true;
-    Promise.all([api<ServerInfo>(token, '/api/info'), api<SessionInfo[]>(token, '/api/sessions')]).then(([server, list]) => {
-      if (!active) return; setReachable(true); setInfo(server); setSessions(list); setSessionsLoaded(true); setSelected(old => old && list.some(s => s.id === old) ? old : null);
+    api<ServerInfo>(token, '/api/info').then(server => {
+      if (!active) return; setInfo(server);
     }).catch(error => { if (active) handleApiError(error, '加载失败'); });
     return () => { active = false; };
-  }, [token, handleApiError]);
-  useEffect(() => {
-    if (!token) return;
-    const sync = () => { void api<SessionInfo[]>(token, '/api/sessions').then(list => { setReachable(true); setSessions(list); setSessionsLoaded(true); setSelected(old => old && list.some(s => s.id === old) ? old : null); }).catch(error => { setReachable(false); if (error instanceof UnauthorizedError) logout(); }); };
-    const timer = window.setInterval(sync, 5000); return () => clearInterval(timer);
   }, [token, handleApiError]);
   const current = sessions.find(s => s.id === selected);
 
   const createSession = async (cwd: string) => {
     if (!token || busy) return; setBusy(true);
-    try { const created = await api<SessionInfo>(token, '/api/sessions', { method: 'POST', body: JSON.stringify({ cwd }) }); setSessions(list => [...list, created]); selectSession(created.id); setCreating(false); setNotice('会话已创建'); }
+    try { const created = await api<SessionInfo>(token, '/api/sessions', { method: 'POST', body: JSON.stringify({ cwd }) }); setSessions(list => list.some(session => session.id === created.id) ? list : [...list, created]); selectSession(created.id); setCreating(false); setNotice('会话已创建'); }
     catch (error) { if (error instanceof UnauthorizedError) logout(); throw error; } finally { setBusy(false); }
   };
   const endSession = async (session: SessionInfo) => {
@@ -111,12 +99,12 @@ export default function App() {
   if (authChecking) return <main className="auth-shell"><div className="auth-card"><span className="brand-mark">›_</span><h1>连接终端</h1><p>正在验证保存的访问令牌…</p></div></main>;
   if (!token) return <main className="auth-shell"><form className="auth-card" onSubmit={event => { event.preventDefault(); void login(authValue.trim() || localStorage.getItem(tokenKey) || ''); }}><span className="brand-mark">›_</span><h1>Web Terminal</h1><p>输入访问令牌，连接到你的工作空间。</p><label htmlFor="token">访问令牌</label><input id="token" type="password" autoComplete="off" value={authValue} onChange={e => setAuthValue(e.target.value)} placeholder={localStorage.getItem(tokenKey) ? '已保存令牌，可直接重试' : '粘贴访问令牌'} /><button className="primary" disabled={busy}>连接</button>{authError && <div className="error" role="alert">{authError}</div>}</form></main>;
   return <div className="app"><header className="tabs-bar">
-    <SessionTabs sessions={sessions} selected={selected} statuses={statuses} activities={activities} reachable={reachable} onSelect={selectSession} onClose={session => { setCloseError(''); setPendingClose(session); }} sessionsReady={sessionsLoaded} onNotice={setNotice} />
+    <SessionTabs sessions={sessions} selected={selected} reachable={reachable} onSelect={selectSession} onClose={session => { setCloseError(''); setPendingClose(session); }} sessionsReady={sessionsLoaded} onNotice={setNotice} />
     <div className="tab-actions"><button title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3h4l.5 3 2 .9 2.5-1.5 2 3.4-2 2.1v2.2l2 2.1-2 3.4-2.5-1.5-2 .9-.5 3h-4l-.5-3-2-.9-2.5 1.5-2-3.4 2-2.1v-2.2l-2-2.1 2-3.4 2.5 1.5 2-.9Z" /><circle cx="12" cy="12" r="3" /></svg></button><button title="创建会话" aria-label="创建会话" onClick={() => setCreating(value => !value)}>＋</button></div>
     {creating && <DirectoryPicker token={token} initialPath={workspaceFolders[0]?.path || current?.cwd || info?.defaultCwd || ''} home={info?.defaultCwd || ''} folders={workspaceFolders} busy={busy} onCreate={createSession} onClose={() => setCreating(false)} onUnauthorized={logout} />}
   </header><div className="workspace">
     {!selected && <div className="content"><div className="terminal-pane"><div className="empty-session"><strong>命令行终端</strong><p>{sessions.length ? '选择已有会话继续使用，或新建一个 Shell。' : '新建一个普通 Shell，运行你需要的命令。'}</p><button className="primary" disabled={busy} onClick={() => setCreating(true)}>新建 Shell</button></div></div></div>}
-    {sessions.filter(session => visited.includes(session.id)).map(session => <SessionPane key={session.id} session={session} token={token} active={selected === session.id} fontFamily={fontFamily} interactionMode={settings.interactionMode} maxUploadBytes={info?.maxUploadBytes ?? 20 * 1024 * 1024} onNotice={setNotice} onUnauthorized={logout} onStatus={onStatus} onActivity={onActivity} setSessions={setSessions} setReachable={setReachable} />)}
+    {sessions.filter(session => visited.includes(session.id)).map(session => <SessionPane key={session.id} session={session} token={token} active={selected === session.id} fontFamily={fontFamily} interactionMode={settings.interactionMode} maxUploadBytes={info?.maxUploadBytes ?? 20 * 1024 * 1024} onNotice={setNotice} onUnauthorized={logout} />)}
   </div>
   {notice.text && <MessageToast key={notice.id} message={notice.text} onClose={clearNotice} />}
   {current && !current.running && dismissedEndedSession !== current.id && !pendingClose && !creating && !settingsOpen && <SessionEndedDialog key={current.id} cwd={current.cwd} busy={busy} onClose={() => setDismissedEndedSession(current.id)} onCreate={() => createSession(current.cwd)} />}

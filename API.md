@@ -12,6 +12,8 @@ HTTP 请求使用 `Authorization: Bearer <token>`。GET /api/auth 验证 token �
 
 WebSocket 同源 /ws，不使用 query token。连接后 5 秒内发送 `auth`（`protocol: 2`）；服务端先发送 `snapshot`（画面、行列数、尺寸控制权），再发送 `ready`，后续增量为 `output`。快照与增量必须顺序写入 xterm。终端查询由服务端统一响应，浏览器拦截自动响应，避免多端重复回传。
 
+标签状态使用独立只读订阅：发送 `{type:"auth",protocol:2,token,scope:"sessions"}`，接收 `{type:"sessions",sessions:SessionInfo[]}`。订阅覆盖全部会话，不连接 PTY、不占用尺寸控制权。`running` 表示后端 Shell 存活，`outputActive` 由后端在真实 PTY 输出时置为 true，800ms 无输出后置为 false；历史快照不会触发。创建、退出、删除及输出活动变化立即推送，前台命令和目录每 5 秒刷新。连接和重连先收到当前完整状态，前端不再根据本地终端连接或输出计时推断标签状态。
+
 第一个连接控制尺寸。`resize` 更新该窗口期望尺寸，只有控制窗口会改变 PTY；`claim` 在用户操作时转交控制权。所有窗口按服务端行列数显示，窄窗口可滚动，尺寸变化发送新快照。键盘使用 `input`；文字、图片路径使用 `paste`（`text`、`submit`），由服务端按当前粘贴模式编码，提交回车在粘贴结束标记之外。
 
 未认证关闭码为 4401，协议版本不匹配为 4406（刷新页面），会话结束为 4404。断网自动指数退避重连；已访问会话切换时保留连接。

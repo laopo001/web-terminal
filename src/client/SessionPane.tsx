@@ -24,14 +24,10 @@ const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'
 type Props = {
   session: SessionInfo; token: string; active: boolean; fontFamily: string; interactionMode: InteractionMode; maxUploadBytes: number;
   onNotice: (text: string) => void; onUnauthorized: () => void;
-  onStatus: (id: string, status: string) => void;
-  onActivity: (id: string, active: boolean) => void;
-  setSessions: React.Dispatch<React.SetStateAction<SessionInfo[]>>;
-  setReachable: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
 /** 首次选中后保留；隐藏只停止交互与尺寸上报，连接和画面继续更新。 */
-export function SessionPane({ session, token, active, fontFamily, interactionMode, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout, onStatus, onActivity, setSessions, setReachable }: Props) {
+export function SessionPane({ session, token, active, fontFamily, interactionMode, maxUploadBytes, onNotice: setNotice, onUnauthorized: logout }: Props) {
   const sessionId = session.id;
   const activeRef = useRef(active);
   const fontRef = useRef(fontFamily);
@@ -39,8 +35,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   const mounted = useRef(true);
   useLayoutEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  const [status, setLocalStatus] = useState('未连接');
-  const setStatus = useCallback((value: string) => { setLocalStatus(value); onStatus(sessionId, value); }, [sessionId, onStatus]);
+  const [status, setStatus] = useState('未连接');
   const [uploads, renderUploads] = useState<Attachment[]>([]);
   const uploadsRef = useRef<Attachment[]>([]);
   const setUploads = (update: (items: Attachment[]) => Attachment[]) => { uploadsRef.current = update(uploadsRef.current); renderUploads(uploadsRef.current); };
@@ -143,16 +138,6 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
     let liveOutput = false;
-    let activityTimer: number | undefined;
-    const stopActivity = () => {
-      if (activityTimer !== undefined) clearTimeout(activityTimer);
-      activityTimer = undefined; onActivity(sessionId, false);
-    };
-    const showActivity = () => {
-      if (activityTimer !== undefined) clearTimeout(activityTimer);
-      else onActivity(sessionId, true);
-      activityTimer = window.setTimeout(stopActivity, 800);
-    };
     const term = new Terminal({ cursorBlink: true, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
     const responses = suppressTerminalResponses(term);
     const clipboard = enableTerminalClipboard(term, {
@@ -241,10 +226,9 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             await write(msg.data);
             if (scrollLine !== undefined && term.buffer.active.type === 'normal') term.scrollToLine(scrollLine);
           } else if (msg.type === 'ready') {
-            retry = 0; readyRef.current = true; setReachable(true); setStatus('已连接');
-            cwdRef.current = msg.session.cwd; setSessions(list => list.map(s => s.id === sessionId ? msg.session : s)); resize();
+            retry = 0; readyRef.current = true; setStatus('已连接');
+            cwdRef.current = msg.session.cwd; resize();
           } else if (msg.type === 'output') {
-            if (msg.data) showActivity();
             const start = term.buffer.active.baseY + term.buffer.active.cursorY, base = cwdRef.current;
             liveOutput = true;
             try { await write(msg.data); } finally { liveOutput = false; }
@@ -252,7 +236,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             const end = term.buffer.active.baseY + term.buffer.active.cursorY;
             for (let row = start; row <= end; row++) lineBases.set(row, base);
             for (const row of lineBases.keys()) if (row < term.buffer.active.baseY - 2000) lineBases.delete(row);
-          } else if (msg.type === 'exit') { stopActivity(); readyRef.current = false; setStatus(`Shell 已退出 · ${msg.exitCode}`); }
+          } else if (msg.type === 'exit') { readyRef.current = false; setStatus(`Shell 已退出 · ${msg.exitCode}`); }
           else if (msg.type === 'error') {
             if (msg.message.startsWith('会话已结束')) { readyRef.current = false; setStatus('会话已结束'); }
             else setNotice(msg.message);
@@ -261,21 +245,20 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
       };
       ws.onclose = event => {
         if (disposed || ws !== connection) return;
-        stopActivity();
         readyRef.current = false;
         if (event.code === 4406) { setStatus('需要刷新页面'); setNotice('终端协议已更新，请刷新页面'); return; }
         if (event.code === 4401) { logout(); return; }
-        if (event.code === 4404) { setStatus('会话已结束'); void api<SessionInfo[]>(token, '/api/sessions').then(setSessions).catch(error => handleApiError(error, '会话同步失败')); return; }
+        if (event.code === 4404) { setStatus('会话已结束'); return; }
         retry++; const delay = Math.min(30_000, 700 * 2 ** Math.min(retry, 6));
         setStatus(`已断开 · ${Math.ceil(delay / 1000)} 秒后重连`);
         reconnectTimer = window.setTimeout(connect, delay);
       };
-      ws.onerror = () => { if (!disposed && ws === connection) { stopActivity(); setStatus('连接出错'); } };
+      ws.onerror = () => { if (!disposed && ws === connection) { setStatus('连接出错'); } };
       });
     };
     connect();
-    return () => { disposed = true; stopActivity(); if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); inputFocus.dispose(); updateInputFocusRef.current = () => {}; selection.dispose(); scrolling.dispose(); touch.dispose(); cancelTouchRef.current = () => {}; geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
-  }, [sessionId, token, inspect, activatePath, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, setSessions, setReachable, copyText, onActivity]);
+    return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); inputFocus.dispose(); updateInputFocusRef.current = () => {}; selection.dispose(); scrolling.dispose(); touch.dispose(); cancelTouchRef.current = () => {}; geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
+  }, [sessionId, token, inspect, activatePath, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, copyText]);
 
   useEffect(() => {
     const term = termRef.current;

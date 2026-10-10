@@ -90,6 +90,7 @@ export async function createApp(config: Config, options: { dev?: boolean; static
   });
   wss.on('connection', ws => {
     let sessionId: string | undefined;
+    let watching = false;
     const timer = setTimeout(() => ws.close(4401, '需要 token'), 5000);
     ws.once('close', () => clearTimeout(timer));
     ws.on('error', () => {});
@@ -97,9 +98,11 @@ export async function createApp(config: Config, options: { dev?: boolean; static
       try {
         if (binary) throw new Error('消息格式无效');
         const message = JSON.parse(raw.toString());
+        if (watching) throw new Error('会话状态订阅只支持读取');
         if (!sessionId) {
           if (message.type !== 'auth' || !validToken(message.token, config.token)) { ws.close(4401, 'token 无效'); return; }
           if (message.protocol !== 2) { send(ws, { type: 'error', message: '终端协议已更新，请刷新页面' }); ws.close(4406, '请刷新页面'); return; }
+          if (message.scope === 'sessions') { watching = true; clearTimeout(timer); sessions.watch(ws); return; }
           if (typeof message.sessionId !== 'string') throw new Error('会话无效');
           const session = sessions.get(message.sessionId);
           sessionId = session.info.id;

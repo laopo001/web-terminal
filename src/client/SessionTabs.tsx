@@ -18,8 +18,8 @@ export function sessionLabel(session: SessionInfo) {
   return { name, folder, agent };
 }
 
-export function SessionTabs({ sessions, selected, statuses, activities, reachable, onSelect, onClose, sessionsReady, onNotice }: {
-  sessions: SessionInfo[]; selected: string | null; statuses: Record<string, string>; activities: Record<string, boolean>; reachable: boolean;
+export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, sessionsReady, onNotice }: {
+  sessions: SessionInfo[]; selected: string | null; reachable: boolean;
   onSelect: (id: string) => void; onClose: (session: SessionInfo) => void;
   sessionsReady: boolean; onNotice: (message: string) => void;
 }) {
@@ -81,11 +81,9 @@ export function SessionTabs({ sessions, selected, statuses, activities, reachabl
   const renderSession = (session: SessionInfo) => {
     const { name, folder, agent } = sessionLabel(session);
     const active = selected === session.id;
-    const status = statuses[session.id];
-    const state = !reachable ? 'offline' : !session.running ? 'ended'
-      : status === undefined || status === '已连接' ? 'live' : status.includes('连接中') || status.includes('重连中') ? 'connecting' : 'offline';
-    const hint = !reachable ? '无法连接服务' : !session.running ? '会话已结束' : status || '会话运行中';
-    const outputActive = state === 'live' && !!activities[session.id];
+    const state = !reachable ? 'offline' : session.running ? 'live' : 'ended';
+    const hint = !reachable ? '状态同步已断开' : session.running ? '会话运行中' : '会话已结束';
+    const outputActive = state === 'live' && !!session.outputActive;
     const placement = dropTarget?.kind === 'session' && dropTarget.id === session.id ? ` drop-${dropTarget.side}` : '';
     return <div className={`session ${active ? 'active' : ''}${placement}${dragged?.kind === 'session' && dragged.id === session.id ? ' dragging' : ''}`} key={session.id} data-session-id={session.id}
       draggable onDragStart={event => startDrag(event, {kind:'session',id:session.id})} onDragEnd={stopDrag}
@@ -113,7 +111,7 @@ export function SessionTabs({ sessions, selected, statuses, activities, reachabl
         const group = block.group;
         const folded = group.collapsed;
         const active = block.sessions.some(session => session.id === selected);
-        const activeOutput = block.sessions.some(session => activities[session.id]);
+        const activeOutput = reachable && block.sessions.some(session => session.running && session.outputActive);
         return <div key={group.id} className={`session-group ${folded ? 'collapsed' : ''}${dragged?.kind === 'group' && dragged.id === group.id ? ' dragging' : ''}`} data-group-id={group.id} role="group" aria-label={group.name}
           style={{ '--group-color': groupColorStyles[group.color].color } as CSSProperties}>
           <div className={`session-group-header${dropTarget?.kind === 'group' && dropTarget.id === group.id ? ' drop-group' : ''}`} draggable
