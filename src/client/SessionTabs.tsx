@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent, type DragEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type DragEvent } from 'react';
 import type { SessionInfo } from '../shared/protocol';
 import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type SessionGroup, type TabItem, type TabDrop } from './sessionGroups';
 import { useSessionGroups } from './useSessionGroups';
@@ -66,6 +66,23 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
     return { kind: 'session', id, side: event.clientX < rect.left + rect.width / 2 ? 'before' : 'after' };
   }
   const collapsedKey = groups.map(group => `${group.id}:${group.collapsed}`).join(',');
+  useLayoutEffect(() => {
+    const element = list.current;
+    if (!element) return;
+    const headers = [...element.querySelectorAll<HTMLElement>('.session-group-header')];
+    const fitTabs = () => {
+      const count = element.querySelectorAll('.session').length;
+      const headerWidth = headers.reduce((sum, header) => sum + header.getBoundingClientRect().width, 0);
+      const gap = parseFloat(getComputedStyle(element).columnGap) || 0;
+      const reserved = headerWidth + gap * Math.max(0, count + headers.length - 1) + headers.length * 2;
+      const width = count ? Math.max(64, Math.min(240, (element.clientWidth - reserved) / count)) : 240;
+      element.style.setProperty('--tab-width', `${width}px`);
+    };
+    fitTabs();
+    const observer = new ResizeObserver(fitTabs);
+    observer.observe(element); headers.forEach(header => observer.observe(header));
+    return () => observer.disconnect();
+  }, [sessions.length, layout]);
   useEffect(() => {
     const element = list.current;
     if (!element) return;
