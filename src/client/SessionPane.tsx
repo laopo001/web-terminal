@@ -253,7 +253,10 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             for (let row = start; row <= end; row++) lineBases.set(row, base);
             for (const row of lineBases.keys()) if (row < term.buffer.active.baseY - 2000) lineBases.delete(row);
           } else if (msg.type === 'exit') { stopActivity(); readyRef.current = false; setStatus(`Shell 已退出 · ${msg.exitCode}`); }
-          else if (msg.type === 'error') setNotice(msg.message);
+          else if (msg.type === 'error') {
+            if (msg.message.startsWith('会话已结束')) { readyRef.current = false; setStatus('会话已结束'); }
+            else setNotice(msg.message);
+          }
         }).catch(() => { if (!disposed) setNotice('终端画面恢复失败，请重新连接'); });
       };
       ws.onclose = event => {

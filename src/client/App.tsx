@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ServerInfo, SessionInfo } from '../shared/protocol';
 import { api, errorText, UnauthorizedError } from './api';
 import { CloseSessionDialog } from './CloseSessionDialog';
+import { SessionEndedDialog } from './SessionEndedDialog';
 import { MessageToast } from './MessageToast';
 import { DirectoryPicker } from './DirectoryPicker';
 import { useWorkspaceFolders } from './useWorkspaceFolders';
@@ -43,7 +44,9 @@ export default function App() {
   const [pendingClose, setPendingClose] = useState<SessionInfo | null>(null);
   const [closing, setClosing] = useState(false);
   const [closeError, setCloseError] = useState('');
+  const [dismissedEndedSession, setDismissedEndedSession] = useState<string | null>(null);
   const selectSession = useCallback((id: string) => {
+    setDismissedEndedSession(null);
     setVisited(list => list.includes(id) ? list : [...list, id]);
     setSelected(id);
   }, []);
@@ -52,7 +55,7 @@ export default function App() {
   const logout = useCallback(() => {
     localStorage.removeItem(tokenKey); setToken(null); setSessions([]); setSelected(null);
     setVisited([]); setStatuses({}); setActivities({}); setPendingClose(null); setCloseError('');
-    setSessionsLoaded(false);
+    setSessionsLoaded(false); setDismissedEndedSession(null);
   }, []);
   const handleApiError = useCallback((error: unknown, message: string) => { if (error instanceof UnauthorizedError) logout(); else setNotice(`${message}：${errorText(error)}`); }, [logout, setNotice]);
   useEffect(() => {
@@ -116,6 +119,7 @@ export default function App() {
     {sessions.filter(session => visited.includes(session.id)).map(session => <SessionPane key={session.id} session={session} token={token} active={selected === session.id} fontFamily={fontFamily} interactionMode={settings.interactionMode} maxUploadBytes={info?.maxUploadBytes ?? 20 * 1024 * 1024} onNotice={setNotice} onUnauthorized={logout} onStatus={onStatus} onActivity={onActivity} setSessions={setSessions} setReachable={setReachable} />)}
   </div>
   {notice.text && <MessageToast key={notice.id} message={notice.text} onClose={clearNotice} />}
+  {current && !current.running && dismissedEndedSession !== current.id && !pendingClose && !creating && !settingsOpen && <SessionEndedDialog key={current.id} cwd={current.cwd} busy={busy} onClose={() => setDismissedEndedSession(current.id)} onCreate={() => createSession(current.cwd)} />}
   {pendingClose && <CloseSessionDialog name={pendingClose.name} busy={closing} error={closeError} onCancel={() => setPendingClose(null)} onConfirm={() => void endSession(pendingClose)} />}
   {settingsOpen && <SettingsDialog value={settings} defaultFont={defaultFont} onClose={() => setSettingsOpen(false)} onSave={next => { saveClientSettings(next); setSettings(next); setSettingsOpen(false); }} />}
   </div>;
