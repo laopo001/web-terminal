@@ -13,13 +13,20 @@ import { probeService } from './service/probe.ts';
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     url: { type: 'string', default: defaultServerUrl }, home: { type: 'string' }, config: { type: 'string' },
-    version: { type: 'boolean' }, help: { type: 'boolean' },
+    version: { type: 'boolean' }, help: { type: 'boolean' }, vsix: { type: 'string' },
   } });
   if (values.version) { console.log(JSON.stringify({ service: serviceName, version: serviceVersion })); return; }
   const action = positionals[0] || 'start';
   if (values.help) {
-    console.log('web-terminal [start|restart|stop|status] [--url http://localhost:3840] [--config /path/config.yaml] [--home /path/state]\n配置、token、进程状态和日志默认位于 ~/.web-terminal/。重启会结束普通 Shell 会话。'); return;
+    console.log('web-terminal [start|restart|stop|status] [--url http://localhost:3840] [--config /path/config.yaml] [--home /path/state]\nweb-terminal install-vscode [--vsix /path/web-terminal.vsix]\n安装自带插件到已检测到的 VS Code Stable/Insiders；WSL 下同时安装 Windows 宿主。\n配置、token、进程状态和日志默认位于 ~/.web-terminal/。重启会结束普通 Shell 会话。'); return;
   }
+  if (action === 'install-vscode') {
+    const { installVSCodeExtension } = await import('./vscodeInstaller.ts');
+    await installVSCodeExtension({ vsixPath: values.vsix, onInstalled: result => console.log(`${result.target} 已安装 ${result.extension}`) });
+    console.log('请在已打开的 VS Code 窗口运行 Developer: Reload Window 以加载插件。');
+    return;
+  }
+  if (values.vsix) throw new Error('--vsix 仅用于 install-vscode');
   const url = normalizeServerUrl(values.url!);
   if (action === 'status') { console.log(JSON.stringify(await probeService(url))); return; }
   if (action !== 'serve') {

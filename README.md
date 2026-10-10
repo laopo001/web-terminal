@@ -94,11 +94,21 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 
 ### VS Code
 
+安装全局 CLI 后，用一条命令安装 npm 包自带的插件：
+
 ```bash
-pnpm package:vscode
+web-terminal install-vscode
 ```
 
-在 VS Code 的扩展菜单选择“从 VSIX 安装”，打开 `release/web-terminal.vsix`。点击活动栏终端图标或运行 `Web Terminal: Show Sidebar` 打开侧边窗口；`Web Terminal: Open` 在编辑器标签页打开。两处均加载现有 Web 页面。默认地址为 `http://localhost:3840`；通过 `Web Terminal: Set Server URL` 或设置 `webTerminal.serverUrl` 修改，`Web Terminal: Reload` 重载；侧栏及编辑器标题栏的重启按钮重启后台并等待就绪。Remote WSL/SSH 在扩展宿主所在机器检测和启动，再使用 VS Code 的端口转发能力。Windows 本机默认先查本机全局 CLI，再查默认 WSL；可通过 `webTerminal.runtime` 和 `webTerminal.cliPath` 调整。
+自动安装到检测到的 VS Code Stable 和 Insiders；WSL 下同时安装 WSL 扩展宿主和 Windows 宿主。已打开的窗口需运行 `Developer: Reload Window` 加载插件。可用 `web-terminal install-vscode --vsix /path/web-terminal.vsix` 安装指定文件。
+
+本地开发打包并安装：
+
+```bash
+pnpm install:vscode
+```
+
+也可运行 `pnpm package:vscode`，在 VS Code 的扩展菜单选择“从 VSIX 安装”，打开 `release/web-terminal.vsix`。点击活动栏终端图标或运行 `Web Terminal: Show Sidebar` 打开侧边窗口；`Web Terminal: Open` 在编辑器标签页打开。两处均加载现有 Web 页面。默认地址为 `http://localhost:3840`；通过 `Web Terminal: Set Server URL` 或设置 `webTerminal.serverUrl` 修改，`Web Terminal: Reload` 重载；侧栏及编辑器标题栏的重启按钮重启后台并等待就绪。Remote WSL/SSH 在扩展宿主所在机器检测和启动，再使用 VS Code 的端口转发能力。Windows 本机默认先查本机全局 CLI，再查默认 WSL；可通过 `webTerminal.runtime` 和 `webTerminal.cliPath` 调整。
 
 选中编辑器中的文本后，右键选择“发送选中文本到 Web Terminal”，以附件形式加入当前会话，带有文件路径、语言与行号。点击发送后送入终端。
 
@@ -109,7 +119,7 @@ pnpm electron
 pnpm package:electron:win
 ```
 
-开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.3-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
+开发命令打开桌面客户端；Windows 命令生成 `release/Web-Terminal-0.1.4-win-x64.zip`，解压后运行 `Web Terminal.exe`。菜单“连接 → 打开连接配置”打开 `client.yaml`，只需修改 `serverUrl`，再选择“重新加载服务器”；“重启后台服务”通过全局 CLI 重启。`client.yaml` 的 `runtime` 可选 auto、native、wsl，`cliPath` 可指定本机 CLI 路径。也可用 `WEB_TERMINAL_URL` 临时覆盖地址。Linux 目录包通过 `pnpm package:electron:linux` 生成。
 
 浏览器、VS Code、Electron 各自首次在同一 Web 登录页输入 token，验证后保存在各自 Webview 的持久 localStorage 中。客户端配置不保存 token。Electron 远程页面开启 sandbox/contextIsolation、关闭 Node 集成；VS Code 通过专用 `/?embed=vscode` 入口加载，普通入口仍禁止 iframe 嵌入。
 
