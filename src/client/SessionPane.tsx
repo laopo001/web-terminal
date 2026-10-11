@@ -6,7 +6,8 @@ import { isImagePath, isTextPath, quoteForShell } from './paths';
 import { api, fileBlob, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
 import { pathLinkProvider } from './links';
 import { arrowSequence } from './terminalKeys';
-import { DraftInput } from './DraftInput';
+import { DraftInput, isDraftHistoryBoundary } from './DraftInput';
+import { appendSendHistory, loadSendHistory } from './sendHistory';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import type { FilePreview } from './api';
 import { enableTouchInteraction } from './terminalTouch';
@@ -44,6 +45,23 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [hover, setHover] = useState<{ file: FileInfo; url: string | null; x: number; y: number; error?: string } | null>(null);
   const [draft, setDraft] = useState('');
+  const historyCursor = useRef<{ entries: string[]; index: number; draft: string } | null>(null);
+  const editDraft = (value: string) => { historyCursor.current = null; setDraft(value); };
+  const navigateHistory = (direction: 'up' | 'down'): boolean => {
+    let cursor = historyCursor.current;
+    if (!cursor) {
+      if (direction === 'down') return false;
+      const entries = loadSendHistory();
+      if (!entries.length) return false;
+      cursor = { entries, index: entries.length, draft };
+      historyCursor.current = cursor;
+    }
+    const index = Math.max(0, Math.min(cursor.entries.length, cursor.index + (direction === 'up' ? -1 : 1)));
+    if (index === cursor.index) return false;
+    cursor.index = index;
+    setDraft(index === cursor.entries.length ? cursor.draft : cursor.entries[index]!);
+    return true;
+  };
   const [copyMode, setCopyMode] = useState(false);
   const composing = useRef(false);
   const compositionEnded = useRef(0);
@@ -328,6 +346,8 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
         const payload = [text, ...attachments.map(item => item.text ?? (item.path ? quoteForShell(item.path) : ''))].filter(Boolean).join('\n');
         if (!payload.trim()) return;
         claimRef.current(); socket.current.send(JSON.stringify({ type: 'paste', text: payload, submit: true } satisfies ClientMessage));
+        try { appendSendHistory(payload); } catch { setNotice('文字已发送，但发送历史保存失败'); }
+        historyCursor.current = null;
         setDraft(value => value === text ? '' : value);
         setUploads(items => items.filter(item => item.id > sentUploadId));
       }
@@ -353,7 +373,11 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
           </div>)}</div>
           <button className="attachment-clear" onClick={() => setUploads(() => [])}>全部清除</button>
         </div>}
-        <div className="draft-row"><DraftInput ref={draftInput} style={{ fontFamily }} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={setDraft} onKeyDown={e => {
+        <div className="draft-row"><DraftInput ref={draftInput} style={{ fontFamily }} aria-label="待发送文字" onFocus={() => claimRef.current()} onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; compositionEnded.current = Date.now(); }} value={draft} onChange={editDraft} onKeyDown={e => {
+          if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) {
+            const direction = e.key === 'ArrowUp' ? 'up' : 'down';
+            if (isDraftHistoryBoundary(e.currentTarget, direction) && navigateHistory(direction)) { e.preventDefault(); e.stopPropagation(); }
+          }
           if (e.key === 'Enter' && !e.shiftKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); }
         }} placeholder="输入命令或描述…" /></div>
         <div className="mobile-keys" data-preserve-input-focus role="toolbar" aria-label="触屏终端快捷键"><button disabled={status !== '已连接'} onClick={() => sendKey('\t')}>Tab</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}</div>
