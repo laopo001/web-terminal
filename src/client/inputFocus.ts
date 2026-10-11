@@ -12,10 +12,21 @@ function isEditingField(element: Element | null): element is HTMLElement {
 /** 点击非输入区域时结束编辑；不阻止按钮获得正常的键盘导航焦点。 */
 export function useInputFocusPolicy() {
   useEffect(() => {
+    let pointerDownEditor: HTMLElement | null = null;
+    const cancelPointer = () => { pointerDownEditor = null; };
     const leaveEditing = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (isEditingField(target?.closest('input,textarea,[contenteditable]') ?? null)) return;
+      const editor = target?.closest('input,textarea,[contenteditable]') ?? null;
       const active = document.activeElement;
+      if (event.type === 'pointerdown') {
+        pointerDownEditor = isEditingField(editor) ? editor : null;
+      } else {
+        const startedInEditor = pointerDownEditor;
+        pointerDownEditor = null;
+        // 拖选在编辑区外松开时，click 会落到外层容器，仍应保留编辑焦点。
+        if (event instanceof MouseEvent && event.detail > 0 && startedInEditor === active) return;
+      }
+      if (isEditingField(editor)) return;
       const button = target?.closest('button');
       // 桌面标签拖动需要浏览器默认的 pointerdown；触屏继续延后收起键盘。
       const nativeDrag = target?.closest('[draggable="true"]') && event instanceof PointerEvent && event.pointerType !== 'touch';
@@ -28,8 +39,9 @@ export function useInputFocusPolicy() {
       if (isEditingField(active)) active.blur();
     };
     document.addEventListener('pointerdown', leaveEditing, true);
+    document.addEventListener('pointercancel', cancelPointer, true);
     document.addEventListener('click', leaveEditing, true);
-    return () => { document.removeEventListener('pointerdown', leaveEditing, true); document.removeEventListener('click', leaveEditing, true); };
+    return () => { document.removeEventListener('pointerdown', leaveEditing, true); document.removeEventListener('pointercancel', cancelPointer, true); document.removeEventListener('click', leaveEditing, true); };
   }, []);
 }
 
