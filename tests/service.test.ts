@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { createServer } from 'node:http';
 import { createServer as createTcpServer } from 'node:net';
+import net from 'node:net';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -46,6 +48,29 @@ test('端口接受连接但不响应时不当作服务未启动，也不执行 C
   const url = await listening(server);
   try { assert.equal((await probeService(url, 100)).kind, 'unreachable'); }
   finally { for (const socket of sockets) socket.destroy(); await new Promise<void>(done => server.close(() => done())); }
+});
+
+test('WSL 本地端口连接超时：空闲端口视为停止，占用和远程端口仍拒绝启动', { skip: process.platform !== 'linux' }, async () => {
+  const available = await unusedUrl();
+  const server = createTcpServer(socket => socket.destroy());
+  const occupied = await listening(server);
+  const fetchMock = mock.method(globalThis, 'fetch', async () => { throw new Error('network timeout'); });
+  const connectMock = mock.method(net, 'connect', () => {
+    const socket = new net.Socket();
+    queueMicrotask(() => socket.emit('error', Object.assign(new Error('network timeout'), { code: 'ETIMEDOUT' })));
+    return socket;
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.equal((await probeService(available, 100)).kind, 'stopped');
+    assert.equal((await probeService(available.replace('127.0.0.1', 'localhost'), 100)).kind, 'stopped');
+    assert.equal((await probeService(occupied, 100)).kind, 'unreachable');
+    await assert.rejects(ensureService(occupied, { cliPath: '/missing/web-terminal' }), /无法访问/);
+    assert.equal((await probeService('http://192.0.2.1:3840', 100)).kind, 'unreachable');
+  } finally {
+    fetchMock.mock.restore(); connectMock.mock.restore(); syncBuiltinESMExports();
+    await new Promise<void>(done => server.close(() => done()));
+  }
 });
 
 test('客户端报告未安装，拒绝在不受信任工作区启动', async () => {
@@ -96,6 +121,17 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
       assert.notEqual((await identity()).pid, suspended);
       suspended = 0;
     }
+    // 突然关机/强制退出不会清理状态文件和锁，下次启动应校验失效 PID 后恢复。
+    const crashed = await identity();
+    process.kill(crashed.pid, 'SIGKILL');
+    for (let i = 0; i < 100 && await processStamp(crashed.pid); i++) await new Promise(done => setTimeout(done, 10));
+    assert.equal(await processStamp(crashed.pid), undefined);
+    const staleState = await readFile(join(paths, 'server.yaml'), 'utf8');
+    assert.match(staleState, new RegExp(`pid: ${crashed.pid}`));
+    await writeFile(join(paths, 'manager.lock'), stringify({ pid: crashed.pid, stamp: 'previous-boot' }));
+    await cli('start');
+    assert.notEqual((await identity()).instanceId, crashed.instanceId);
+    assert.equal(await readFile(join(root, 'custom-data/token'), 'utf8'), tokenBefore);
     await cli('stop');
     assert.equal((await probeService(url)).kind, 'stopped');
     // 故意放入复用 PID 的旧状态；不得停止这个无关进程。

@@ -1,4 +1,4 @@
-import { connect } from 'node:net';
+import { connect, createServer } from 'node:net';
 import { normalizeServerUrl } from '../shared/clientUrl.ts';
 import { serviceName, serviceProtocol, type ServiceIdentity } from '../shared/service.ts';
 
@@ -19,6 +19,24 @@ async function portState(url: URL, timeout: number): Promise<'open' | 'closed' |
     socket.setTimeout(timeout, () => finish('unknown'));
     socket.once('connect', () => finish('open'));
     socket.once('error', error => finish((error as NodeJS.ErrnoException).code === 'ECONNREFUSED' ? 'closed' : 'unknown'));
+  });
+}
+
+/** WSL 的未监听 IPv4 端口可能超时；短暂绑定本机端口确认可用，不启动应用。 */
+async function localPortAvailable(url: URL, timeout: number): Promise<boolean> {
+  if (process.platform !== 'linux' || !isLocalServer(url.href)) return false;
+  const host = url.hostname === 'localhost' ? '127.0.0.1' : url.hostname.replace(/^\[|\]$/g, '');
+  return new Promise(resolve => {
+    const server = createServer(socket => socket.destroy());
+    let finished = false;
+    const finish = (available: boolean) => {
+      if (finished) return;
+      finished = true; clearTimeout(timer); resolve(available);
+    };
+    const timer = setTimeout(() => { server.close(); finish(false); }, timeout);
+    server.once('error', () => finish(false));
+    server.once('listening', () => server.close(() => finish(true)));
+    server.listen({ host, port: Number(url.port || '80'), exclusive: true });
   });
 }
 
@@ -55,6 +73,7 @@ export async function probeService(input: string, timeout = 1500): Promise<Servi
     const state = await portState(url, timeout);
     if (state === 'closed') return { kind: 'stopped' };
     if (state === 'open') return { kind: 'unreachable', message: `${root} 端口已占用但身份检查无响应；服务可能挂起。未启动其他服务。` };
+    if (await localPortAvailable(url, timeout)) return { kind: 'stopped' };
     return { kind: 'unreachable', message: `无法访问 ${root}，请检查网络、地址或转发配置。` };
   }
 }
