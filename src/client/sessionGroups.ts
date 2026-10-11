@@ -140,3 +140,15 @@ export function sessionTabBlocks(sessions: SessionInfo[], layout: TabLayout): { 
     return group ? [{ group, sessions: group.sessionIds.map(id => byId.get(id)!) }] : [];
   });
 }
+
+/** 新会话沿用已结束标签的位置与分组；推送可能已提前加入新 ID。 */
+export function replaceSessionTab(layout: TabLayout, oldId: string, newId: string): TabLayout {
+  const oldKey = itemKey({ kind: 'session', id: oldId });
+  const newKey = itemKey({ kind: 'session', id: newId });
+  return {
+    order: layout.order.filter(key => key !== newKey).map(key => key === oldKey ? newKey : key),
+    groups: layout.groups.map(group => ({ ...group,
+      sessionIds: group.sessionIds.filter(id => id !== newId).map(id => id === oldId ? newId : id),
+    })),
+  };
+}

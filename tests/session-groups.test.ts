@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { SessionInfo } from '../src/shared/protocol';
-import { loadTabLayout, parseTabLayout, reconcileTabLayout, saveTabLayout, sessionTabBlocks, updateTabLayout, type TabLayout, type TabLayoutAction } from '../src/client/sessionGroups.ts';
+import { loadTabLayout, parseTabLayout, replaceSessionTab, reconcileTabLayout, saveTabLayout, sessionTabBlocks, updateTabLayout, type TabLayout, type TabLayoutAction } from '../src/client/sessionGroups.ts';
 
 const ids = ['a', 'b', 'c', 'd'];
 const fresh = () => reconcileTabLayout({ order: [], groups: [] }, ids);
@@ -115,5 +115,23 @@ test('连续分组和拖动始终保留全部标签，且不改写此前保存�
     assert.deepEqual(layout,before);
     assert.deepEqual([...flattened(next)].sort(), ids);
     layout=next;
+  }
+});
+
+test('重新打开终端保留独立标签位置，移除推送提前加入的新标签', () => {
+  const layout = reconcileTabLayout(fresh(), [...ids, 'new']);
+  const replaced = replaceSessionTab(layout, 'b', 'new');
+  assert.deepEqual(reconcileTabLayout(replaced, ['a', 'new', 'c', 'd']).order,
+    ['session:a', 'session:new', 'session:c', 'session:d']);
+  assert.deepEqual(layout.order, [...ids, 'new'].map(id => `session:${id}`));
+});
+
+test('重新打开终端保留组内顺序、颜色和单成员分组', () => {
+  for (const multiple of [false, true]) {
+    let layout = create(fresh(), 'b');
+    if (multiple) layout = update(layout, { type: 'assign', sessionId: 'd', groupId: 'project' });
+    const replaced = reconcileTabLayout(replaceSessionTab(layout, 'b', 'new'), ['a', 'new', 'c', 'd']);
+    assert.deepEqual(replaced.order, layout.order);
+    assert.deepEqual(replaced.groups, [{ ...layout.groups[0], sessionIds: multiple ? ['new', 'd'] : ['new'] }]);
   }
 });

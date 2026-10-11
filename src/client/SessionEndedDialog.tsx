@@ -21,12 +21,12 @@ export function SessionEndedDialog({ cwd, busy, onClose, onCreate }: {
   return <dialog ref={ref} className="session-close-dialog session-ended-dialog" aria-labelledby="session-ended-title"
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     <h2 id="session-ended-title">会话已结束</h2>
-    <p>可以在当前路径新建终端。</p>
+    <p>可以在当前路径重新打开终端。</p>
     <p className="session-ended-path">{cwd}</p>
     {error && <p className="error" role="alert">{error}</p>}
     <div className="session-close-actions">
       <button autoFocus disabled={busy} onClick={onClose}>关闭</button>
-      <button className="primary" disabled={busy} onClick={() => void create()}>{busy ? '正在创建…' : '在当前路径新建终端'}</button>
+      <button className="primary" disabled={busy} onClick={() => void create()}>{busy ? '正在创建…' : '在当前路径重新打开终端'}</button>
     </div>
   </dialog>;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionInfo } from '../shared/protocol';
-import { loadTabLayout, parseTabLayout, reconcileTabLayout, saveTabLayout, tabLayoutStorageKey, updateTabLayout, type TabLayout, type TabLayoutAction } from './sessionGroups';
+import { loadTabLayout, parseTabLayout, replaceSessionTab, reconcileTabLayout, saveTabLayout, tabLayoutStorageKey, updateTabLayout, type TabLayout, type TabLayoutAction } from './sessionGroups';
 
 export function useSessionGroups(sessions: SessionInfo[], ready: boolean, onNotice: (message: string) => void) {
   const [layout, setLayout] = useState(loadTabLayout);
@@ -28,5 +28,6 @@ export function useSessionGroups(sessions: SessionInfo[], ready: boolean, onNoti
     return () => window.removeEventListener('storage', sync);
   }, []);
   const change = (action: TabLayoutAction) => persist(updateTabLayout(latest.current, ids, action));
-  return { layout, change };
+  const replace = (oldId: string, newId: string) => persist(replaceSessionTab(latest.current, oldId, newId));
+  return { layout, change, replace };
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type DragEvent } from 'react';
 import type { SessionInfo } from '../shared/protocol';
-import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type SessionGroup, type TabItem, type TabDrop } from './sessionGroups';
-import { useSessionGroups } from './useSessionGroups';
+import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type SessionGroup, type TabItem, type TabDrop, type TabLayout, type TabLayoutAction } from './sessionGroups';
 import { SessionGroupDialog } from './SessionGroupDialog';
 import { TabMenu, type TabMenuPosition } from './TabMenu';
 import { TerminalProgressIndicator } from './TerminalProgressIndicator';
@@ -14,13 +13,12 @@ export function sessionLabel(session: SessionInfo) {
   return { name, folder, agent };
 }
 
-export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, sessionsReady, onNotice }: {
+export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, layout, onLayoutChange: change }: {
   sessions: SessionInfo[]; selected: string | null; reachable: boolean;
   onSelect: (id: string) => void; onClose: (session: SessionInfo) => void;
-  sessionsReady: boolean; onNotice: (message: string) => void;
+  layout: TabLayout; onLayoutChange: (action: TabLayoutAction) => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
-  const { layout, change } = useSessionGroups(sessions, sessionsReady, onNotice);
   const groups = layout.groups;
   const [menu, setMenu] = useState<(TabMenuPosition & ({ kind: 'session'; session: SessionInfo } | { kind: 'group'; group: SessionGroup })) | null>(null);
   const [editing, setEditing] = useState<{ group: SessionGroup } | { session: SessionInfo } | null>(null);
