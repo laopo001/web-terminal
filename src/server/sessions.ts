@@ -199,8 +199,14 @@ export class Sessions {
   }
   paste(id: string, ws: WebSocket, text: string, submit: boolean) {
     const session = this.get(id);
-    void session.screen.run(() => {
-      if (session.clients.has(ws)) session.process?.write(pasteText(text, session.screen.terminal.modes.bracketedPasteMode) + (submit ? '\r' : ''));
+    void session.screen.run(async () => {
+      if (!session.clients.has(ws) || !session.process) return;
+      const process = session.process;
+      process.write(pasteText(text, session.screen.terminal.modes.bracketedPasteMode));
+      if (submit) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (session.process === process && session.info.running) process.write('\r');
+      }
     });
   }
   resize(id: string, ws: WebSocket, cols: number, rows: number, claim = false) {
