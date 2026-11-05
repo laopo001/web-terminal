@@ -1,6 +1,7 @@
 import type { Terminal } from '@xterm/xterm';
 import { arrowSequence } from './terminalKeys';
 import type { InteractionMode } from './clientSettings';
+import { SCROLL_SENSITIVITY } from './terminalInteraction';
 
 type Gesture = {
   id: number; x: number; y: number; lastX: number; lastY: number; remainder: number; startedAt: number;
@@ -152,7 +153,7 @@ export function enableTouchInteraction(term: Terminal, options: {
       term.scrollToLine(Math.max(0, Math.min(bar.lines, Math.round(bar.viewport + dy * bar.lines / bar.travel)))); return;
     }
     const { height } = metrics();
-    gesture.remainder += (gesture.lastY - event.clientY) / height; gesture.lastY = event.clientY;
+    gesture.remainder += (gesture.lastY - event.clientY) / height * SCROLL_SENSITIVITY; gesture.lastY = event.clientY;
     const lines = Math.trunc(gesture.remainder); gesture.remainder -= lines;
     if (!lines) return;
     if (term.buffer.active.type === 'normal' && term.buffer.active.baseY > 0) term.scrollLines(lines);

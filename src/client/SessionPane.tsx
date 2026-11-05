@@ -11,7 +11,7 @@ import { appendSendHistory, loadSendHistory } from './sendHistory';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import type { FilePreview } from './api';
 import { enableTouchInteraction } from './terminalTouch';
-import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection } from './terminalInteraction';
+import { isFocusReport, isMouseReport, preferScrollback, preferTextSelection, SCROLL_SENSITIVITY } from './terminalInteraction';
 import { suppressTerminalResponses } from './terminalResponses';
 import { UploadThumbnail } from './UploadThumbnail';
 import { enableTerminalClipboard, writeClipboardText } from './terminalClipboard';
@@ -156,7 +156,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
     let liveOutput = false;
-    const term = new Terminal({ cursorBlink: true, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
+    const term = new Terminal({ cursorBlink: true, scrollSensitivity: SCROLL_SENSITIVITY, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
     const responses = suppressTerminalResponses(term);
     const clipboard = enableTerminalClipboard(term, {
       canWrite: () => !disposed && liveOutput && activeRef.current && !document.hidden && document.hasFocus(),

@@ -1,5 +1,7 @@
 import type { Terminal } from '@xterm/xterm';
 
+export const SCROLL_SENSITIVITY = 2;
+
 export function isFocusReport(data: string): boolean {
   return data === '\x1b[I' || data === '\x1b[O';
 }
@@ -16,7 +18,7 @@ export function preferScrollback(term: Terminal) {
     if (event.ctrlKey || event.shiftKey || !event.deltaY || term.buffer.active.type !== 'normal' || term.buffer.active.baseY === 0) return;
     const height = element.querySelector<HTMLElement>('.xterm-screen')?.offsetHeight || term.rows * 17;
     const lines = event.deltaMode === 1 ? event.deltaY : event.deltaMode === 2 ? event.deltaY * term.rows : event.deltaY / (height / term.rows);
-    remainder += lines;
+    remainder += lines * SCROLL_SENSITIVITY;
     const scroll = Math.trunc(remainder); remainder -= scroll;
     event.preventDefault(); event.stopImmediatePropagation();
     if (scroll) term.scrollLines(scroll);
