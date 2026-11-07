@@ -142,9 +142,15 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     } catch (error) { handleApiError(error, '打开文件失败'); }
   }, [sessionId, token, inspect, revokeHover, handleApiError, setNotice]);
 
-  const download = async (file: FileInfo) => {
+  const previewAttachment = (item: Attachment) => {
+    revokePreview();
+    const url = item.text === undefined ? URL.createObjectURL(item.file) : null;
+    previewUrl.current = url;
+    setPreview({ file: { path: item.path || '', name: item.file.name, size: item.file.size, mime: item.file.type, isImage: item.text === undefined }, url, text: item.text, loading: false, localFile: item.file });
+  };
+  const download = async (file: FileInfo, localFile?: File) => {
     if (!sessionId || !token) return;
-    try { const url = await blobUrl(token, urlFor(sessionId, 'content', file.path, undefined, 'download')); const a = document.createElement('a'); a.href = url; a.download = file.name; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }
+    try { const url = localFile ? URL.createObjectURL(localFile) : await blobUrl(token, urlFor(sessionId, 'content', file.path, undefined, 'download')); const a = document.createElement('a'); a.href = url; a.download = file.name; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000); }
     catch (error) { handleApiError(error, '下载失败'); }
   };
 
@@ -367,7 +373,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
         {uploads.length > 0 && <div className="composer-attachments" aria-label="待发送附件">
           <span className="attachment-count" title={`${uploads.length} 个附件`}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.9-2.9l8.5-8.5" /></svg> {uploads.length}</span>
           <div className="attachment-list">{uploads.map(item => <div key={item.id} className={`attachment-card ${item.failed ? 'error' : ''}`}>
-            {item.text !== undefined ? <pre className="attachment-text">{item.text}</pre> : <UploadThumbnail file={item.file} />}
+            <button className="attachment-preview" aria-label={`预览 ${item.file.name}`} title={`预览 ${item.file.name}`} onClick={() => previewAttachment(item)}>{item.text !== undefined ? <span className="attachment-text">{item.text}</span> : <UploadThumbnail file={item.file} />}</button>
             <div className="attachment-caption"><span title={item.file.name}>{item.text !== undefined ? '▤ ' : ''}{item.file.name}</span><button aria-label={`移除 ${item.file.name}`} onClick={() => setUploads(items => items.filter(x => x.id !== item.id))}>×</button></div>
             <div className="attachment-status" title={item.state}>{item.state}{item.failed && <button onClick={() => { setUploads(items => items.filter(x => x.id !== item.id)); uploadFile(item.file); }}>重试</button>}</div>
           </div>)}</div>
@@ -392,5 +398,5 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
           <span className="composer-hint">Enter 发送 · Shift+Enter 换行</span>
           <button className="composer-send" title={status === '已连接' ? '发送到当前会话' : status} onClick={() => void sendDraft(true)} disabled={(!draft.trim() && !uploads.length) || sending || status !== '已连接'}>{sending ? '等待上传…' : status !== '已连接' ? '未连接' : '发送'}<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg></button>
         </div>
-      </div></div></div>{preview && <FilePreviewDialog preview={preview} onClose={revokePreview} onCopy={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))} onDownload={() => void download(preview.file)} />}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={e => { const files = [...(e.target.files || [])]; e.target.value = ''; files.forEach(uploadFile); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
+      </div></div></div>{preview && <FilePreviewDialog preview={preview} onClose={revokePreview} onCopy={() => void navigator.clipboard.writeText(preview.file.path).then(() => setNotice('路径已复制')).catch(error => setNotice(`复制失败：${errorText(error)}`))} onDownload={() => void download(preview.file, preview.localFile)} />}<input ref={fileInput} className="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={e => { const files = [...(e.target.files || [])]; e.target.value = ''; files.forEach(uploadFile); }} />{hover?.url && <div className="hover-card" style={{ left: Math.min(hover.x + 16, window.innerWidth - 240), top: Math.min(hover.y + 16, window.innerHeight - 220) }}><img src={hover.url} alt={hover.file.name} /><span>{hover.file.name}</span></div>}</div>;
 }

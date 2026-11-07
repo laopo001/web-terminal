@@ -21,4 +21,4 @@ export async function fileBlob(token: string, url: string): Promise<Blob> {
 export async function blobUrl(token: string, url: string): Promise<string> {
   return URL.createObjectURL(await fileBlob(token, url));
 }
-export type FilePreview = { file: FileInfo; url: string | null; loading: boolean; text?: string; error?: string };
+export type FilePreview = { file: FileInfo; url: string | null; loading: boolean; text?: string; error?: string; localFile?: File };

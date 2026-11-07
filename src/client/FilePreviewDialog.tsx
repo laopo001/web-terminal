@@ -11,7 +11,7 @@ export function FilePreviewDialog({ preview, onClose, onCopy, onDownload }: {
     onCancel={event => { event.preventDefault(); onClose(); }}
     onClick={event => { if (event.target === ref.current) { const rect = ref.current!.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
     <header><h2 id="file-preview-title" title={file.path}>{file.name}</h2><button autoFocus aria-label="关闭文件预览" onClick={onClose}>×</button></header>
-    <p className="file-path">{file.path}</p>
+    {file.path && <p className="file-path">{file.path}</p>}
     <div className="file-preview-content">
       {loading && <p role="status">正在加载预览…</p>}
       {error && <p className="error" role="alert">{error}</p>}
@@ -19,6 +19,6 @@ export function FilePreviewDialog({ preview, onClose, onCopy, onDownload }: {
       {!loading && !error && url && <img src={url} alt={file.name} />}
       {!loading && !error && text === undefined && !url && <p>此文件暂不支持直接预览，可下载查看。</p>}
     </div>
-    <footer><span>{(file.size / 1024).toFixed(1)} KB</span><button onClick={onCopy}>复制路径</button><button className="primary" disabled={loading} onClick={onDownload}>下载文件</button></footer>
+    <footer><span>{(file.size / 1024).toFixed(1)} KB</span>{file.path && <button onClick={onCopy}>复制路径</button>}<button className="primary" disabled={loading} onClick={onDownload}>下载文件</button></footer>
   </dialog>;
 }
