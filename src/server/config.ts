@@ -8,7 +8,7 @@ export interface Config {
   host: string; port: number; dataDir: string; uploadDir: string; token: string;
   defaultCwd: string; shell: string; machineId: string; maxUploadBytes: number;
 }
-export function loadConfig(defaults: { configFile?: string; dataDir?: string; uploadDir?: string } = {}): Config {
+export function loadConfig(defaults: { configFile?: string; dataDir?: string; uploadDir?: string; host?: string } = {}): Config {
   const configFile = resolve(process.env.WEB_TERMINAL_CONFIG || defaults.configFile || 'config.yaml');
   const raw = existsSync(configFile) ? parse(readFileSync(configFile, 'utf8')) : {};
   if (raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) throw new Error('config.yaml 必须是配置对象');
@@ -27,7 +27,7 @@ export function loadConfig(defaults: { configFile?: string; dataDir?: string; up
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('port 无效');
   const uploadHome = resolve(process.env.WEB_TERMINAL_HOME || resolve(homedir(), '.web-terminal'));
   return {
-    host: String(process.env.HOST || input.host || '127.0.0.1'), port, dataDir, token,
+    host: String(process.env.HOST || input.host || defaults.host || '127.0.0.1'), port, dataDir, token,
     uploadDir: resolve(input.uploadDir || defaults.uploadDir || resolve(uploadHome, 'uploads')),
     defaultCwd: realpathSync(resolve(input.defaultCwd || homedir())),
     shell: String(input.shell || process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash')),

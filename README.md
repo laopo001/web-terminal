@@ -48,6 +48,8 @@ CLI 默认使用 `~/.web-terminal/config.yaml`，相对路径以配置文件所�
 
 CLI 只停止自己登记且启动标识匹配的进程，不接管 `pnpm start` 或 systemd 启动的外部服务。外部服务可以连接，重启时会提示使用原管理器。
 
+需要局域网访问时，在服务运行机器的 `~/.web-terminal/config.yaml` 中设置 `host: 0.0.0.0`，再运行 `web-terminal restart` 或点击 VS Code 插件的重启后台服务按钮（会结束普通 Shell 会话）。监听地址优先使用 `HOST` 环境变量，其次为配置中的 `host`；未设置时使用本机管理地址。插件的 `webTerminal.serverUrl` 保持 `http://localhost:3840`，其他设备访问 `http://服务器局域网IP:3840`；端口仍由管理 URL 决定。WSL/Windows 还需允许对应端口的局域网入站访问。
+
 ## 发布
 
 推送与 `package.json` 版本一致的 `v*` 标签后，`.github/workflows/publish.yaml` 自动检查、构建、打包，并通过 npm Trusted Publishing 发布，再创建 GitHub Release 和上传附件。npm 仅信任 `laopo001/web-terminal` 仓库中的此工作流，不需要发布 token。手动运行工作流只验证和生成产物。

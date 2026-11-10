@@ -89,11 +89,17 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
   const home = join(root, 'home');
   await mkdir(home);
   const customConfig = join(root, 'custom.yaml');
-  await writeFile(customConfig, stringify({ defaultCwd: root, shell: '/bin/bash', dataDir: 'custom-data' }));
+  await writeFile(customConfig, stringify({ host: '0.0.0.0', port: 1, defaultCwd: root, shell: '/bin/bash', dataDir: 'custom-data' }));
   const url = await unusedUrl();
   const env: NodeJS.ProcessEnv = { ...process.env, WEB_TERMINAL_HOME: home };
   delete env.WEB_TERMINAL_CONFIG;
   delete env.WEB_TERMINAL_DATA_DIR;
+  delete env.HOST;
+  const otherLoopbackUrl = url.replace('127.0.0.1', '127.0.0.2');
+  const assertWildcardListener = async (instanceId: string) => {
+    const response = await fetch(`${otherLoopbackUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    assert.equal((await response.json()).instanceId, instanceId);
+  };
   const cli = (action: string, args: string[] = []) => execute(process.execPath, [output, action, '--url', url, ...args], { cwd: home, env, timeout: 25000 });
   const identity = async () => { const status = await probeService(url); assert.equal(status.kind, 'ready'); if (status.kind !== 'ready') throw new Error('not ready'); return status.identity; };
   let suspended = 0;
@@ -104,6 +110,7 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     const [first, second] = await Promise.all([cli('start', ['--config', customConfig]), cli('start', ['--config', customConfig])]);
     assert.equal(JSON.parse(first.stdout).identity.instanceId, JSON.parse(second.stdout).identity.instanceId);
     const initial = await identity();
+    await assertWildcardListener(initial.instanceId);
     const page = await fetch(url); assert.match(await page.text(), /CLI package fixture/);
     assert.equal((await fetch(url + '/api/sessions')).status, 401);
     const paths = join(home, 'servers', new URL(url).port);
@@ -111,6 +118,7 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     await cli('restart');
     const restarted = await identity();
     assert.notEqual(restarted.instanceId, initial.instanceId);
+    await assertWildcardListener(restarted.instanceId);
     assert.equal(await readFile(join(root, 'custom-data/token'), 'utf8'), tokenBefore);
     assert.equal(await processStamp(initial.pid), undefined);
     if (process.platform === 'linux') {
@@ -134,6 +142,11 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     assert.equal(await readFile(join(root, 'custom-data/token'), 'utf8'), tokenBefore);
     await cli('stop');
     assert.equal((await probeService(url)).kind, 'stopped');
+    // VS Code 插件不传 --config；默认管理目录中的监听配置同样生效。
+    await writeFile(join(home, 'config.yaml'), stringify({ host: '0.0.0.0' }));
+    await cli('start');
+    await assertWildcardListener((await identity()).instanceId);
+    await cli('stop');
     // 故意放入复用 PID 的旧状态；不得停止这个无关进程。
     innocent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
     await once(innocent, 'spawn');
