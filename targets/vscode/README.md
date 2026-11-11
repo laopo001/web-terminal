@@ -8,6 +8,6 @@
 
 默认地址 `http://localhost:3840`，用 **Web Terminal: Set Server URL** 或 `webTerminal.serverUrl` 修改。远程地址只连接，不在本机安装或启动。Remote WSL/SSH 使用扩展宿主所在机器；本机 Windows 的 `webTerminal.runtime` 默认 `auto`，优先本机 CLI，其次默认 WSL，也可显式选择 `native` 或 `wsl`。`webTerminal.cliPath` 可指定本机 CLI 绝对路径。未受信任的工作区不会自动启动服务。
 
-CLI 默认配置为 `~/.web-terminal/config.yaml`，token、日志及状态位于 `~/.web-terminal/servers/<端口>/`。首次在 Web 页面输入 `data/token` 的内容，页面自行保存在 localStorage；插件不读取 token。
+CLI 默认配置和登录密码均保存在 `~/.web-terminal/config.yaml`，日志及状态位于 `~/.web-terminal/servers/<端口>/`。首次在 Web 页面输入配置中的 `token` 字段，页面自行保存在 localStorage；插件不读取 token。
 
 选中代码后，右键选择“发送选中文本到 Web Terminal”加入当前会话附件区；文本带有路径、语言和行号。点击终端输出中的文件路径会使用 VS Code 打开文件。

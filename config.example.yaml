@@ -1,9 +1,10 @@
-# 复制为 config.yaml 后修改。token 首次启动自动生成，保存在 .data/token。
+# 默认配置：~/.web-terminal/config.yaml。token 首次启动自动生成并写入该文件。
 host: 127.0.0.1
 port: 3840
 # 默认工作目录为当前用户的 home，可按需指定绝对路径。
 # defaultCwd: /home/yourname/projects
 # shell: /bin/zsh
-dataDir: .data
+# token: "your-password"
+# dataDir: /home/yourname/.web-terminal/data
 # 图片默认保存在 ~/.web-terminal/uploads，可指定其他目录。
 # uploadDir: /home/yourname/.web-terminal/uploads

@@ -53,7 +53,7 @@ async function main() {
   if (!stamp) throw new Error('无法取得进程启动标识，拒绝启动不可安全管理的后台');
   await new Promise<void>((done, reject) => { runtime.server.once('error', reject); runtime.server.listen(config.port, config.host, done); });
   await writeState(paths.state, { pid: process.pid, stamp, instanceId, url, config: configFile });
-  console.log(`Web Terminal ${serviceVersion}: ${url}\ntoken 文件：${join(config.dataDir, 'token')}`);
+  console.log(`Web Terminal ${serviceVersion}: ${url}\n配置和登录 token：${config.configFile}（token 字段，或 WEB_TERMINAL_TOKEN）`);
   let closing = false;
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => {
     if (closing) return;

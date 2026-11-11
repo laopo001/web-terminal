@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { build } from 'esbuild';
-import { stringify } from 'yaml';
+import { parse, stringify } from 'yaml';
 import { probeService } from '../src/service/probe.ts';
 import { ensureService, ServiceNotInstalledError } from '../src/service/client.ts';
 import { processStamp } from '../src/service/process.ts';
@@ -95,6 +95,7 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
   delete env.WEB_TERMINAL_CONFIG;
   delete env.WEB_TERMINAL_DATA_DIR;
   delete env.HOST;
+  delete env.WEB_TERMINAL_TOKEN;
   const otherLoopbackUrl = url.replace('127.0.0.1', '127.0.0.2');
   const assertWildcardListener = async (instanceId: string) => {
     const response = await fetch(`${otherLoopbackUrl}/health`, { signal: AbortSignal.timeout(3000) });
@@ -104,6 +105,7 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
   const identity = async () => { const status = await probeService(url); assert.equal(status.kind, 'ready'); if (status.kind !== 'ready') throw new Error('not ready'); return status.identity; };
   let suspended = 0;
   let innocent: ReturnType<typeof spawn> | undefined;
+  let standalone: ReturnType<typeof spawn> | undefined;
   try {
     const versions = JSON.parse((await execute(process.execPath, [output, '--version'])).stdout);
     assert.equal(versions.service, serviceName);
@@ -114,12 +116,14 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     const page = await fetch(url); assert.match(await page.text(), /CLI package fixture/);
     assert.equal((await fetch(url + '/api/sessions')).status, 401);
     const paths = join(home, 'servers', new URL(url).port);
-    const tokenBefore = await readFile(join(root, 'custom-data/token'), 'utf8');
+    const tokenBefore = parse(await readFile(customConfig, 'utf8')).token;
+    assert.equal(typeof tokenBefore, 'string');
+    assert.equal((await fetch(url + '/api/sessions', { headers: { Authorization: `Bearer ${tokenBefore}` } })).status, 200);
     await cli('restart');
     const restarted = await identity();
     assert.notEqual(restarted.instanceId, initial.instanceId);
     await assertWildcardListener(restarted.instanceId);
-    assert.equal(await readFile(join(root, 'custom-data/token'), 'utf8'), tokenBefore);
+    assert.equal(parse(await readFile(customConfig, 'utf8')).token, tokenBefore);
     assert.equal(await processStamp(initial.pid), undefined);
     if (process.platform === 'linux') {
       suspended = restarted.pid;
@@ -139,14 +143,31 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     await writeFile(join(paths, 'manager.lock'), stringify({ pid: crashed.pid, stamp: 'previous-boot' }));
     await cli('start');
     assert.notEqual((await identity()).instanceId, crashed.instanceId);
-    assert.equal(await readFile(join(root, 'custom-data/token'), 'utf8'), tokenBefore);
+    assert.equal(parse(await readFile(customConfig, 'utf8')).token, tokenBefore);
     await cli('stop');
     assert.equal((await probeService(url)).kind, 'stopped');
     // VS Code 插件不传 --config；默认管理目录中的监听配置同样生效。
     await writeFile(join(home, 'config.yaml'), stringify({ host: '0.0.0.0' }));
     await cli('start');
     await assertWildcardListener((await identity()).instanceId);
+    const sharedToken = parse(await readFile(join(home, 'config.yaml'), 'utf8')).token;
     await cli('stop');
+    // 源码入口默认读取同一全局配置，并使用 CLI 已保存的密码登录。
+    standalone = spawn(process.execPath, ['--import', import.meta.resolve('tsx'), resolve('src/server/index.ts')], {
+      cwd: root, env: { ...env, PORT: new URL(url).port }, stdio: 'ignore',
+    });
+    await once(standalone, 'spawn');
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && (await probeService(url, 100)).kind !== 'ready') await new Promise(done => setTimeout(done, 25));
+    const sourceIdentity = await identity();
+    assert.equal(sourceIdentity.managed, false);
+    await assertWildcardListener(sourceIdentity.instanceId);
+    assert.equal((await fetch(url + '/api/sessions', { headers: { Authorization: `Bearer ${sharedToken}` } })).status, 200);
+    assert.equal(parse(await readFile(join(home, 'config.yaml'), 'utf8')).token, sharedToken);
+    const exited = once(standalone, 'exit');
+    standalone.kill();
+    await exited;
+    standalone = undefined;
     // 故意放入复用 PID 的旧状态；不得停止这个无关进程。
     innocent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
     await once(innocent, 'spawn');
@@ -158,6 +179,11 @@ test('真实 CLI：从任意目录启动、并发复用、重启、挂起恢复�
     if (suspended) { try { process.kill(suspended, 'SIGCONT'); } catch {} }
     await cli('stop').catch(() => {});
     innocent?.kill();
+    if (standalone && standalone.exitCode === null && standalone.signalCode === null) {
+      const exited = once(standalone, 'exit');
+      standalone.kill();
+      await exited;
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

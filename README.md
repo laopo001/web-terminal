@@ -12,10 +12,10 @@ pnpm build
 pnpm start
 ```
 
-打开 http://localhost:3840 。首次启动自动生成 token，另开终端读取后粘贴到登录页：
+打开 http://localhost:3840 。首次启动在 `~/.web-terminal/config.yaml` 中生成 `token`，读取该字段后粘贴到登录页：
 
 ```bash
-cat .data/token
+cat ~/.web-terminal/config.yaml
 ```
 
 也可以在启动时通过 `WEB_TERMINAL_TOKEN` 指定非空 token。token 不放入页面 URL、图片链接或 WebSocket URL。
@@ -44,7 +44,7 @@ web-terminal stop
 
 link 指向当前项目；服务端或前端源码修改后执行 `pnpm build`，再重启服务。安装命令为 `npm install -g @dadigua/web-terminal`。
 
-CLI 默认使用 `~/.web-terminal/config.yaml`，相对路径以配置文件所在目录为准；每个端口的 token、状态和日志分别位于 `~/.web-terminal/servers/<端口>/data/token`、`server.yaml` 和 `server.log`。首次登录读取对应 token 文件。可用 `--url http://localhost:3841` 选择端口、`--config /path/config.yaml` 指定配置，`--home /path/state` 指定管理目录。CLI 启动为后台进程，关闭客户端不会结束服务；重启保留 token，但结束普通 Shell 会话。
+CLI、VS Code 插件和 `pnpm start` / `pnpm dev` 默认共用 `~/.web-terminal/config.yaml`，密码保存在其中的 `token` 字段，相对路径以配置文件所在目录为准。未配置 token 时沿用已有数据目录中的旧密码，否则自动生成；旧 token 文件保留但不再作为密码来源。CLI 的会话数据、状态和日志仍位于 `~/.web-terminal/servers/<端口>/`；源码启动默认仍使用启动目录下的 `.data/` 保存会话数据，可通过 `dataDir` 指定。可用 `--url http://localhost:3841` 选择端口、`--config /path/config.yaml` 指定配置，`--home /path/state` 指定管理目录。CLI 启动为后台进程，关闭客户端不会结束服务；重启保留 token，但结束普通 Shell 会话。
 
 CLI 只停止自己登记且启动标识匹配的进程，不接管 `pnpm start` 或 systemd 启动的外部服务。外部服务可以连接，重启时会提示使用原管理器。
 
@@ -82,9 +82,9 @@ ssh -N -L 3840:127.0.0.1:3840 user@server
 
 然后在本机打开 http://localhost:3840 。也可放到已有 HTTPS 反向代理后，代理需支持 WebSocket 并保留 Host。直接用远程 HTTP 地址时，浏览器的部分剪贴板能力可能不可用。
 
-复制 `config.example.yaml` 为 `config.yaml`，按需配置监听地址、端口、默认目录。环境变量支持 `HOST`、`PORT`、`WEB_TERMINAL_CONFIG`、`WEB_TERMINAL_DATA_DIR`、`WEB_TERMINAL_TOKEN`。相对配置路径以启动目录为基准。
+按需编辑 `~/.web-terminal/config.yaml` 中的监听地址、端口、默认目录和 `token`，字段示例见 `config.example.yaml`。项目目录的 `config.yaml` 不再自动读取，可通过 `WEB_TERMINAL_CONFIG` 显式指定。环境变量支持 `HOST`、`PORT`、`WEB_TERMINAL_CONFIG`、`WEB_TERMINAL_DATA_DIR`、`WEB_TERMINAL_TOKEN`。相对配置文件路径以启动目录为基准，文件内的相对目录以配置文件所在目录为基准。
 
-登录者拥有服务运行用户的终端权限。`.data/` 保存 token、会话元数据和上传图片，不应提交到 Git。
+登录者拥有服务运行用户的终端权限。配置文件包含登录 token，会话数据目录包含会话元数据和上传文件，不应提交到 Git。
 
 需要时在终端里手动运行 `tmux`，再运行其他命令；Web 服务重启后可新建终端并执行 `tmux attach`。
 
