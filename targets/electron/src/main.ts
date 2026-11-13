@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, Menu, shell, clipboard } from 'electron';
 import { join, resolve } from 'node:path';
 import { readClientSettings, sameServer } from './settings.ts';
 import { ensureService, ServiceNotInstalledError } from '../../../src/service/client.ts';
+import { DIRECT_EXTERNAL_PROTOCOLS, parseExternalUrl } from '../../../src/shared/externalUrl.ts';
 
 app.setName('Web Terminal');
 if (process.env.WEB_TERMINAL_CLIENT_DATA_DIR) app.setPath('userData', resolve(process.env.WEB_TERMINAL_CLIENT_DATA_DIR));
@@ -49,7 +50,23 @@ function createWindow() {
     requester?.id === contents.id && sameServer(requestingOrigin, target) && clipboardPermissions.has(permission));
   contents.on('will-navigate', (event, url) => { if (!sameServer(url, target)) event.preventDefault(); });
   contents.on('will-redirect', (event, url) => { if (!sameServer(url, target)) event.preventDefault(); });
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.setWindowOpenHandler(({ url }) => {
+    const parsed = parseExternalUrl(url);
+    if (parsed) {
+      if (DIRECT_EXTERNAL_PROTOCOLS.has(parsed.protocol)) {
+        void shell.openExternal(parsed.href);
+      } else if (window && !window.isDestroyed()) {
+        void dialog.showMessageBox(window, {
+          type: 'question', title: '打开外部协议链接',
+          message: `是否使用系统程序打开 ${parsed.protocol.slice(0, -1)} 链接？`,
+          detail: parsed.href, buttons: ['打开', '取消'], defaultId: 1, cancelId: 1,
+        }).then(answer => {
+          if (answer.response === 0) void shell.openExternal(parsed.href);
+        });
+      }
+    }
+    return { action: 'deny' };
+  });
   window.once('ready-to-show', () => window?.show());
   window.on('closed', () => { window = null; });
   Menu.setApplicationMenu(Menu.buildFromTemplate([

@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { ClientMessage, FileInfo, ServerMessage, SessionInfo } from '../shared/protocol';
+import { parseExternalUrl } from '../shared/externalUrl';
 import { isImagePath, isTextPath, quoteForShell } from './paths';
 import { api, fileBlob, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
-import { pathLinkProvider } from './links';
+import { createOscLinkHandler, terminalLinkProvider } from './links';
 import { arrowSequence } from './terminalKeys';
 import { DraftInput, isDraftHistoryBoundary } from './DraftInput';
 import { appendSendHistory, loadSendHistory } from './sendHistory';
@@ -21,6 +22,10 @@ import { manageTerminalInputFocus } from './inputFocus';
 type Attachment = { id: number; file: File; state: string; failed: boolean; text?: string; path?: string };
 
 const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+function isVsCodeEmbed(): boolean {
+  return window.parent !== window && new URLSearchParams(location.search).get('embed') === 'vscode';
+}
 
 type Props = {
   session: SessionInfo; token: string; active: boolean; fontFamily: string; interactionMode: InteractionMode; maxUploadBytes: number;
@@ -134,13 +139,20 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   }, [sessionId, token, logout, setNotice]);
   const activatePath = useCallback(async (path: string, base: string) => {
     revokeHover();
-    if (window.parent === window || new URLSearchParams(location.search).get('embed') !== 'vscode') { await inspect(path, base, 'preview'); return; }
+    if (!isVsCodeEmbed()) { await inspect(path, base, 'preview'); return; }
     if (!path.startsWith('/') && !path.startsWith('~/') && !base) { setNotice('历史相对路径的工作目录无法确定，请使用绝对路径'); return; }
     try {
       const file = await api<FileInfo>(token, urlFor(sessionId, 'meta', path, base || undefined));
       if (mounted.current && activeRef.current) window.parent.postMessage({ type: 'web-terminal:open-file', path: file.path }, '*');
     } catch (error) { handleApiError(error, '打开文件失败'); }
   }, [sessionId, token, inspect, revokeHover, handleApiError, setNotice]);
+  const activateUrl = useCallback((url: string) => {
+    revokeHover();
+    const parsed = parseExternalUrl(url);
+    if (!parsed) { setNotice('不支持打开该协议的链接'); return; }
+    if (isVsCodeEmbed()) { window.parent.postMessage({ type: 'web-terminal:open-url', url: parsed.href }, '*'); return; }
+    window.open(parsed.href, '_blank', 'noopener,noreferrer');
+  }, [revokeHover, setNotice]);
 
   const previewAttachment = (item: Attachment) => {
     revokePreview();
@@ -162,7 +174,14 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
     let liveOutput = false;
-    const term = new Terminal({ cursorBlink: true, scrollSensitivity: SCROLL_SENSITIVITY, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true });
+    const linkHandlers = {
+      base: (row: number) => lineBases.get(row) ?? '',
+      activatePath: (path: string, base: string) => { void activatePath(path, base); },
+      activateUrl,
+      hover: (path: string, base: string, point: { x: number; y: number }) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); },
+      leave: revokeHover,
+    };
+    const term = new Terminal({ cursorBlink: true, scrollSensitivity: SCROLL_SENSITIVITY, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true, linkHandler: createOscLinkHandler(linkHandlers) });
     const responses = suppressTerminalResponses(term);
     const clipboard = enableTerminalClipboard(term, {
       canWrite: () => !disposed && liveOutput && activeRef.current && !document.hidden && document.hasFocus(),
@@ -220,8 +239,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
       copyText,
     });
     cancelTouchRef.current = touch.cancel;
-    const provider = pathLinkProvider(term, { base: row => lineBases.get(row) ?? '', activate: (path, base) => { void activatePath(path, base); }, hover: (path, base, point) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); }, leave: revokeHover });
-    const linkDisposable = term.registerLinkProvider(provider);
+    const linkDisposable = term.registerLinkProvider(terminalLinkProvider(term, linkHandlers));
     const connect = () => {
       if (disposed) return;
       setStatus(retry ? `重连中 · 第 ${retry} 次` : '连接中');
@@ -282,7 +300,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     };
     connect();
     return () => { disposed = true; if (reconnectTimer) clearTimeout(reconnectTimer); observer.disconnect(); if (resizeTimer) clearTimeout(resizeTimer); document.removeEventListener('visibilitychange', scheduleResize); readyRef.current = false; claimRef.current = () => {}; activateRef.current = () => {}; responses.dispose(); clipboard.dispose(); inputFocus.dispose(); updateInputFocusRef.current = () => {}; selection.dispose(); scrolling.dispose(); touch.dispose(); cancelTouchRef.current = () => {}; geometry.dispose(); inputDisposable.dispose(); linkDisposable.dispose(); ws?.close(); if (socket.current === ws) socket.current = null; term.dispose(); if (termRef.current === term) termRef.current = null; revokeHover(); revokePreview(); };
-  }, [sessionId, token, inspect, activatePath, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, copyText]);
+  }, [sessionId, token, inspect, activatePath, activateUrl, logout, revokeHover, revokePreview, handleApiError, setStatus, setNotice, copyText]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -294,7 +312,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   }, [fontFamily]);
 
   useEffect(() => {
-    if (!active || window.parent === window || new URLSearchParams(location.search).get('embed') !== 'vscode') return;
+    if (!active || !isVsCodeEmbed()) return;
     const receive = (event: MessageEvent) => {
       if (event.source !== window.parent || !activeRef.current) return;
       if (event.data?.type === 'web-terminal:request-composer') { window.parent.postMessage({ type: 'web-terminal:composer-ready' }, '*'); return; }

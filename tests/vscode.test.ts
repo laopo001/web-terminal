@@ -55,6 +55,12 @@ test('iframe queues text until a composer is ready and checks sender origin', as
   assert.equal(host.length, 1);
   receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: openFile });
   assert.deepEqual(JSON.parse(JSON.stringify(host[1])), openFile);
+  const openUrl = { type: 'web-terminal:open-url', url: 'https://github.com/LoveRain1997/h3-prompt-journal.git' };
+  receive({ source: frame.contentWindow, origin: 'https://untrusted.example', data: openUrl });
+  receive({ source: {}, origin: 'http://localhost:3840', data: openUrl });
+  assert.equal(host.length, 2);
+  receive({ source: frame.contentWindow, origin: 'http://localhost:3840', data: openUrl });
+  assert.deepEqual(JSON.parse(JSON.stringify(host[2])), openUrl);
   const attachment = { id: '1', name: 'code.ts', text: 'example' };
   const outerFrame = {}; // VS Code 的外层 frame，与 window、null 均不同。
   receive({ source: outerFrame, origin: 'https://untrusted.example', data: { type: 'web-terminal:text-attachment', attachment: { ...attachment, id: 'forged' } } });

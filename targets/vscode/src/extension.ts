@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'node:crypto';
 import { defaultServerUrl, normalizeServerUrl, vscodeEmbedUrl } from '../../../src/shared/clientUrl.js';
+import { parseExternalUrl } from '../../../src/shared/externalUrl.js';
 import { forwardedEmbedUrl } from './html.js';
 import { editorFilePath, workspacePath } from './workspace.js';
 import { WebviewContent } from './content.js';
@@ -75,13 +76,23 @@ async function refresh(force = false): Promise<void> {
   await Promise.all([panelContent?.update(force), sidebarContent?.update(force)]);
 }
 
-async function receiveMessage(content: WebviewContent, message: { type?: string; path?: unknown }): Promise<void> {
+async function receiveMessage(content: WebviewContent, message: { type?: string; path?: unknown; url?: unknown }): Promise<void> {
   content.receive(message);
-  if (message?.type !== 'web-terminal:open-file' || typeof message.path !== 'string') return;
-  try {
-    const path = editorFilePath(message.path, process.platform, (vscode.workspace.workspaceFolders || []).map(folder => folder.uri));
-    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
-  } catch (error) { void vscode.window.showErrorMessage(`Web Terminal：打开文件失败：${error instanceof Error ? error.message : String(error)}`); }
+  if (message?.type === 'web-terminal:open-file' && typeof message.path === 'string') {
+    try {
+      const path = editorFilePath(message.path, process.platform, (vscode.workspace.workspaceFolders || []).map(folder => folder.uri));
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(path));
+    } catch (error) { void vscode.window.showErrorMessage(`Web Terminal：打开文件失败：${error instanceof Error ? error.message : String(error)}`); }
+    return;
+  }
+  if (message?.type === 'web-terminal:open-url' && typeof message.url === 'string') {
+    const parsed = parseExternalUrl(message.url);
+    if (!parsed) { void vscode.window.showErrorMessage('Web Terminal：不支持打开该协议的链接'); return; }
+    try {
+      const opened = await vscode.env.openExternal(vscode.Uri.parse(parsed.href, true));
+      if (!opened) void vscode.window.showErrorMessage(`Web Terminal：无法打开外部链接：${parsed.href}`);
+    } catch (error) { void vscode.window.showErrorMessage(`Web Terminal：打开链接失败：${error instanceof Error ? error.message : String(error)}`); }
+  }
 }
 
 function attach(current: vscode.WebviewPanel): void {
