@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent, type DragEvent } from 'react';
 import type { SessionInfo } from '../shared/protocol';
-import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type SessionGroup, type TabItem, type TabDrop, type TabLayout, type TabLayoutAction } from './sessionGroups';
+import { groupColorStyles, sessionGroupColors, sessionTabBlocks, itemKey, type SessionGroup, type SessionGroupColor, type TabItem, type TabDrop, type TabLayout, type TabLayoutAction } from './sessionGroups';
 import { SessionGroupDialog } from './SessionGroupDialog';
 import { TabMenu, type TabMenuPosition } from './TabMenu';
 import { TerminalProgressIndicator } from './TerminalProgressIndicator';
@@ -95,12 +95,15 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
     const state = !reachable ? 'offline' : session.running ? 'live' : 'ended';
     const hint = !reachable ? '状态同步已断开' : session.running ? '会话运行中' : '会话已结束';
     const outputActive = state === 'live' && !!session.outputActive;
+    const tabColor = layout.colors?.[session.id];
+    const colorInfo = tabColor ? groupColorStyles[tabColor] : undefined;
     const placement = dropTarget?.kind === 'session' && dropTarget.id === session.id ? ` drop-${dropTarget.side}` : '';
-    return <div className={`session ${active ? 'active' : ''}${placement}${dragged?.kind === 'session' && dragged.id === session.id ? ' dragging' : ''}`} key={session.id} data-session-id={session.id}
+    return <div className={`session ${active ? 'active' : ''}${tabColor ? ' colored' : ''}${placement}${dragged?.kind === 'session' && dragged.id === session.id ? ' dragging' : ''}`} key={session.id} data-session-id={session.id} data-tab-color={tabColor}
+      style={colorInfo ? ({ '--tab-color': colorInfo.color } as CSSProperties) : undefined}
       draggable onDragStart={event => startDrag(event, {kind:'session',id:session.id})} onDragEnd={stopDrag}
       onDragOver={event => over(event, sessionDrop(event, session.id))} onDrop={event => drop(event, sessionDrop(event, session.id))}
       onContextMenu={event => sessionMenu(event, session, true)}>
-      <button className="session-select" draggable aria-pressed={active} title={`${name}\n${session.cwd}\n${hint}\n拖动可排序，拖到组名加入分组`} onClick={() => onSelect(session.id)}>
+      <button className="session-select" draggable aria-pressed={active} title={`${name}\n${session.cwd}\n${hint}${colorInfo ? `\n标签颜色：${colorInfo.label}` : ''}\n拖动可排序，拖到组名加入分组`} onClick={() => onSelect(session.id)}>
         <span className={`dot ${state}${outputActive ? ' output-active' : ''}`} aria-label={outputActive ? '终端正在输出' : hint} />
         {state === 'live' && session.progress && <TerminalProgressIndicator progress={session.progress} />}
         {agent && <span className={`command-icon ${agent}`} aria-label={agent}>{agent === 'claude' ? '✳' : '›_'}</span>}
@@ -145,6 +148,11 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
       {groups.map(group => <button role="menuitem" key={group.id} disabled={group.id === currentGroup?.id} onClick={() => assign(menu.session,group.id)}><span className="menu-color" style={{background:groupColorStyles[group.color].color}} />{group.name}{group.id === currentGroup?.id && <span className="menu-check">✓</span>}</button>)}
       {currentGroup && <><hr /><button role="menuitem" onClick={() => assign(menu.session,null)}>移出分组</button></>}
       {moveMenu({kind:'session',id:menu.session.id},!!currentGroup)}
+      <TabColorPicker
+        key={menu.session.id}
+        color={layout.colors?.[menu.session.id]}
+        onChange={color => { change({ type: 'color', sessionId: menu.session.id, color }); closeMenu(); }}
+      />
     </> : <>
       <button role="menuitem" onClick={() => { setEditing({group:menu.group}); closeMenu(); }}>编辑名称和颜色…</button>
       <button role="menuitem" onClick={() => { toggleGroup(menu.group.id); closeMenu(); }}>{menu.group.collapsed ? '展开分组' : '折叠分组'}</button>
@@ -157,5 +165,59 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
         else change({type:'create',id:globalThis.crypto?.randomUUID?.() || `group-${Date.now()}-${Math.random().toString(36).slice(2)}`,name,color,sessionId:editing.session.id});
         setEditing(null);
       }} />}
+  </>;
+}
+
+/** 仿 macOS Finder 右键菜单的标签颜色圆点选择器。 */
+function TabColorPicker({ color, onChange }: { color?: SessionGroupColor; onChange: (next: SessionGroupColor | null) => void }) {
+  const [hovered, setHovered] = useState<SessionGroupColor | 'clear' | null>(null);
+  const caption = hovered === 'clear'
+    ? '标签颜色 · 清除颜色'
+    : hovered
+      ? `标签颜色 · ${hovered === color ? `取消${groupColorStyles[hovered].label}` : groupColorStyles[hovered].label}`
+      : color
+        ? `标签颜色 · ${groupColorStyles[color].label}`
+        : '标签颜色';
+  return <>
+    <hr />
+    <div className="tab-menu-caption">{caption}</div>
+    <div className="tab-menu-colors" role="group" aria-label="标签颜色" data-menu-row="">
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={!color}
+        aria-label="清除颜色"
+        title="清除颜色"
+        className="tab-color-swatch tab-color-clear"
+        onMouseEnter={() => setHovered('clear')}
+        onMouseLeave={() => setHovered(null)}
+        onFocus={() => setHovered('clear')}
+        onBlur={() => setHovered(null)}
+        onClick={() => onChange(null)}
+      >
+        <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true">
+          <path d="M2.5 9.5 9.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </button>
+      {sessionGroupColors.map(value => {
+        const active = color === value;
+        const { label, color: hex } = groupColorStyles[value];
+        return <button
+          key={value}
+          type="button"
+          role="menuitemradio"
+          aria-checked={active}
+          aria-label={label}
+          title={active ? `${label}（再次点击清除）` : label}
+          className="tab-color-swatch"
+          style={{ background: hex }}
+          onMouseEnter={() => setHovered(value)}
+          onMouseLeave={() => setHovered(null)}
+          onFocus={() => setHovered(value)}
+          onBlur={() => setHovered(null)}
+          onClick={() => onChange(active ? null : value)}
+        >{active ? '✓' : ''}</button>;
+      })}
+    </div>
   </>;
 }

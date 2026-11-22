@@ -135,3 +135,29 @@ test('重新打开终端保留组内顺序、颜色和单成员分组', () => {
     assert.deepEqual(replaced.groups, [{ ...layout.groups[0], sessionIds: multiple ? ['new', 'd'] : ['new'] }]);
   }
 });
+
+test('设置、切换和清除标签头颜色，并随刷新持久化与清理失效会话', () => {
+  let layout = update(fresh(), { type: 'color', sessionId: 'b', color: 'red' });
+  layout = update(layout, { type: 'color', sessionId: 'd', color: 'blue' });
+  layout = update(layout, { type: 'color', sessionId: 'missing', color: 'green' });
+  assert.deepEqual(layout.colors, { b: 'red', d: 'blue' });
+
+  const restored = reconcileTabLayout(parseTabLayout(JSON.parse(JSON.stringify(layout))), ['a', 'b', 'c']);
+  assert.deepEqual(restored.colors, { b: 'red' });
+
+  const cleared = updateTabLayout(restored, ['a', 'b', 'c'], { type: 'color', sessionId: 'b', color: null });
+  assert.equal(cleared.colors, undefined);
+  assert.deepEqual(parseTabLayout({ order: [], groups: [], colors: { a: 'url(evil)', b: 'orange', ['__proto__']: 'red' } }).colors, { b: 'orange' });
+  assert.equal(parseTabLayout({ order: [], groups: [], colors: ['red'] }).colors, undefined);
+});
+
+test('重新打开终端保留标签头颜色，无颜色时不继承残留颜色', () => {
+  const colored = update(fresh(), { type: 'color', sessionId: 'b', color: 'yellow' });
+  const withNew = reconcileTabLayout(colored, [...ids, 'new']);
+  const replaced = reconcileTabLayout(replaceSessionTab(withNew, 'b', 'new'), ['a', 'new', 'c', 'd']);
+  assert.deepEqual(replaced.colors, { new: 'yellow' });
+
+  const withStaleNew = updateTabLayout(colored, [...ids, 'new'], { type: 'color', sessionId: 'new', color: 'red' });
+  const replacedUncolored = reconcileTabLayout(replaceSessionTab(withStaleNew, 'a', 'new'), ['new', 'b', 'c', 'd']);
+  assert.deepEqual(replacedUncolored.colors, { b: 'yellow' });
+});

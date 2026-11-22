@@ -4,7 +4,7 @@ export const tabLayoutStorageKey = 'web-terminal.tabLayout';
 export const sessionGroupColors = ['blue', 'cyan', 'green', 'yellow', 'orange', 'red', 'purple', 'pink', 'gray'] as const;
 export type SessionGroupColor = typeof sessionGroupColors[number];
 export interface SessionGroup { id: string; name: string; color: SessionGroupColor; collapsed: boolean; sessionIds: string[] }
-export interface TabLayout { order: string[]; groups: SessionGroup[] }
+export interface TabLayout { order: string[]; groups: SessionGroup[]; colors?: Record<string, SessionGroupColor> }
 export type TabItem = { kind: 'session' | 'group'; id: string };
 export type TabDrop = { kind: 'session'; id: string; side: 'before' | 'after' } | { kind: 'group'; id: string } | { kind: 'end' };
 export type TabLayoutAction =
@@ -13,6 +13,7 @@ export type TabLayoutAction =
   | { type: 'assign'; sessionId: string; groupId: string | null }
   | { type: 'ungroup'; id: string }
   | { type: 'toggle'; id: string }
+  | { type: 'color'; sessionId: string; color: SessionGroupColor | null }
   | { type: 'move'; item: TabItem; direction: 'first' | -1 | 1 }
   | { type: 'drop'; item: TabItem; target: TabDrop };
 
@@ -23,9 +24,24 @@ export const groupColorStyles: Record<SessionGroupColor, { label: string; color:
   purple: { label: '紫色', color: '#bb9bea' }, pink: { label: '粉色', color: '#e9a0cb' },
   gray: { label: '灰色', color: '#a8b2bf' },
 };
+const isColor = (value: unknown): value is SessionGroupColor => typeof value === 'string' && (sessionGroupColors as readonly string[]).includes(value);
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
 export const itemKey = (item: TabItem) => `${item.kind}:${item.id}`;
 const memberGroup = (layout: TabLayout, id: string) => layout.groups.find(group => group.sessionIds.includes(id));
+
+function sanitizeColors(value: unknown, allowed?: Set<string>): Record<string, SessionGroupColor> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const colors: Record<string, SessionGroupColor> = {};
+  let count = 0;
+  for (const [id, color] of Object.entries(value)) {
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') continue;
+    if (allowed && !allowed.has(id)) continue;
+    if (!isColor(color)) continue;
+    colors[id] = color;
+    count++;
+  }
+  return count ? colors : undefined;
+}
 
 export function parseTabLayout(value: unknown): TabLayout {
   if (!value || typeof value !== 'object') return { order: [], groups: [] };
@@ -33,10 +49,11 @@ export function parseTabLayout(value: unknown): TabLayout {
   const groups: SessionGroup[] = [];
   for (const record of Array.isArray(raw.groups) ? raw.groups : []) {
     if (!record || typeof record.id !== 'string' || groups.some(group => group.id === record.id)
-      || typeof record.name !== 'string' || !record.name.trim() || !sessionGroupColors.includes(record.color)) continue;
+      || typeof record.name !== 'string' || !record.name.trim() || !isColor(record.color)) continue;
     groups.push({ id: record.id, name: record.name.trim().slice(0, 40), color: record.color, collapsed: record.collapsed === true, sessionIds: strings(record.sessionIds) });
   }
-  return { order: strings(raw.order), groups };
+  const colors = sanitizeColors(raw.colors);
+  return colors ? { order: strings(raw.order), groups, colors } : { order: strings(raw.order), groups };
 }
 export function loadTabLayout(): TabLayout {
   try { return parseTabLayout(JSON.parse(localStorage.getItem(tabLayoutStorageKey) || 'null')); }
@@ -54,7 +71,8 @@ export function reconcileTabLayout(layout: TabLayout, ids: string[]): TabLayout 
   const valid = new Set([...groups.map(group => itemKey({ kind: 'group', id: group.id })), ...ids.filter(id => !assigned.has(id)).map(id => itemKey({ kind: 'session', id }))]);
   const order = [...new Set(layout.order.filter(key => valid.has(key)))];
   for (const key of valid) if (!order.includes(key)) order.push(key);
-  return { order, groups };
+  const colors = sanitizeColors(layout.colors, known);
+  return colors ? { order, groups, colors } : { order, groups };
 }
 
 export function updateTabLayout(previous: TabLayout, ids: string[], action: TabLayoutAction): TabLayout {
@@ -84,6 +102,12 @@ export function updateTabLayout(previous: TabLayout, ids: string[], action: TabL
       if (action.type === 'toggle') group.collapsed = !group.collapsed;
       else { group.name = action.name.trim(); group.color = action.color; }
     }
+  } else if (action.type === 'color') {
+    if (!ids.includes(action.sessionId) || (action.color !== null && !isColor(action.color))) return layout;
+    const colors: Record<string, SessionGroupColor> = { ...layout.colors };
+    if (action.color === null) delete colors[action.sessionId];
+    else colors[action.sessionId] = action.color;
+    layout.colors = Object.keys(colors).length ? colors : undefined;
   } else if (action.type === 'ungroup') {
     const group = layout.groups.find(group => group.id === action.id);
     if (!group) return layout;
@@ -141,14 +165,24 @@ export function sessionTabBlocks(sessions: SessionInfo[], layout: TabLayout): { 
   });
 }
 
-/** 新会话沿用已结束标签的位置与分组；推送可能已提前加入新 ID。 */
+/** 新会话沿用已结束标签的位置、分组与颜色；推送可能已提前加入新 ID。 */
 export function replaceSessionTab(layout: TabLayout, oldId: string, newId: string): TabLayout {
   const oldKey = itemKey({ kind: 'session', id: oldId });
   const newKey = itemKey({ kind: 'session', id: newId });
+  let colors: Record<string, SessionGroupColor> | undefined;
+  if (layout.colors) {
+    const nextColors: Record<string, SessionGroupColor> = { ...layout.colors };
+    const inherited = Object.hasOwn(nextColors, oldId) ? nextColors[oldId] : undefined;
+    delete nextColors[oldId];
+    if (inherited) nextColors[newId] = inherited;
+    else delete nextColors[newId];
+    if (Object.keys(nextColors).length) colors = nextColors;
+  }
   return {
     order: layout.order.filter(key => key !== newKey).map(key => key === oldKey ? newKey : key),
     groups: layout.groups.map(group => ({ ...group,
       sessionIds: group.sessionIds.filter(id => id !== newId).map(id => id === oldId ? newId : id),
     })),
+    ...(colors ? { colors } : {}),
   };
 }
