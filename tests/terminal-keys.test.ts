@@ -1,12 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { arrowSequence } from '../src/client/terminalKeys.ts';
+import { arrowSequence, MOBILE_TERMINAL_KEYS, mobileKeySequence } from '../src/client/terminalKeys.ts';
 import { draftSubmission } from '../src/shared/terminalInput.ts';
 
 test('方向按钮遵循终端普通模式与应用光标模式', () => {
   for (const [direction, suffix] of [['up', 'A'], ['down', 'B'], ['left', 'D'], ['right', 'C']] as const) {
     assert.equal(arrowSequence(direction, false), `\x1b[${suffix}`);
     assert.equal(arrowSequence(direction, true), `\x1bO${suffix}`);
+  }
+});
+
+test('触屏快捷键包含斜杠并按顺序发送对应按键序列', () => {
+  assert.deepEqual(
+    MOBILE_TERMINAL_KEYS.map(key => [key.id, key.label]),
+    [['tab', 'Tab'], ['slash', '/'], ['left', '←'], ['up', '↑'], ['down', '↓'], ['right', '→']],
+  );
+  for (const applicationMode of [false, true]) {
+    assert.equal(mobileKeySequence('tab', applicationMode), '\t');
+    assert.equal(mobileKeySequence('slash', applicationMode), '/');
+    for (const direction of ['left', 'up', 'down', 'right'] as const) {
+      assert.equal(mobileKeySequence(direction, applicationMode), arrowSequence(direction, applicationMode));
+    }
   }
 });
 

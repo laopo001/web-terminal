@@ -74,7 +74,7 @@ async page => {
     await clickTool(pane.getByRole('button', { name: '中断当前程序', exact: true }), true);
     check((await sent()).slice(before).includes('\x03'), 'Ctrl C 按钮失效');
     for (const [name, sequences] of [
-      ['Tab', ['\t']], ['左方向键', ['\x1b[D', '\x1bOD']], ['上方向键', ['\x1b[A', '\x1bOA']],
+      ['Tab', ['\t']], ['/', ['/']], ['左方向键', ['\x1b[D', '\x1bOD']], ['上方向键', ['\x1b[A', '\x1bOA']],
       ['下方向键', ['\x1b[B', '\x1bOB']], ['右方向键', ['\x1b[C', '\x1bOC']],
     ]) {
       before = (await sent()).length;

@@ -6,7 +6,7 @@ import { parseExternalUrl } from '../shared/externalUrl';
 import { isImagePath, isTextPath, quoteForShell } from './paths';
 import { api, fileBlob, blobUrl, errorText, UnauthorizedError, urlFor } from './api';
 import { createOscLinkHandler, terminalLinkProvider } from './links';
-import { arrowSequence } from './terminalKeys';
+import { MOBILE_TERMINAL_KEYS, mobileKeySequence } from './terminalKeys';
 import { DraftInput, isDraftHistoryBoundary } from './DraftInput';
 import { appendSendHistory, loadSendHistory } from './sendHistory';
 import { FilePreviewDialog } from './FilePreviewDialog';
@@ -404,7 +404,7 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
           }
           if (e.key === 'Enter' && !e.shiftKey && !composing.current && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && Date.now() - compositionEnded.current >= 80) { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void sendDraft(); }
         }} placeholder="输入命令或描述…" /></div>
-        <div className="mobile-keys" data-preserve-input-focus role="toolbar" aria-label="触屏终端快捷键"><button disabled={status !== '已连接'} onClick={() => sendKey('\t')}>Tab</button>{([['left', '←', '左方向键'], ['up', '↑', '上方向键'], ['down', '↓', '下方向键'], ['right', '→', '右方向键']] as const).map(([direction, label, title]) => <button key={direction} aria-label={title} title={title} disabled={status !== '已连接'} onClick={() => sendKey(arrowSequence(direction, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{label}</button>)}</div>
+        <div className="mobile-keys" data-preserve-input-focus role="toolbar" aria-label="触屏终端快捷键">{MOBILE_TERMINAL_KEYS.map(key => <button key={key.id} aria-label={key.ariaLabel} title={key.title} disabled={status !== '已连接'} onClick={() => sendKey(mobileKeySequence(key.id, termRef.current?.modes.applicationCursorKeysMode ?? false))}>{key.label}</button>)}</div>
         <div className="composer-actions">
           <div className="composer-tools" role="toolbar" aria-label="终端操作">
             <button className="attach-image" title="添加图片，也可粘贴或拖入" aria-label="添加图片" onClick={() => fileInput.current?.click()}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m21 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.9-2.9l8.5-8.5" /></svg></button>
