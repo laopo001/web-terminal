@@ -7,10 +7,21 @@ import { TerminalProgressIndicator } from './TerminalProgressIndicator';
 
 export function sessionLabel(session: SessionInfo) {
   const command = session.processName?.replace(/^.*\//, '') || '';
-  const agent = /^(codex|claude)(?:$|[-.])/i.exec(command)?.[1]?.toLowerCase();
   const folder = session.cwd.replace(/\/+$/, '').split('/').pop() || '/';
   const name = session.title?.trim() || command || session.name;
-  return { name, folder, agent };
+  return { name, folder, command };
+}
+
+export function sessionTooltip(session: SessionInfo, hint: string, colorLabel?: string) {
+  const { name, command } = sessionLabel(session);
+  return [
+    name,
+    session.cwd,
+    session.running && command ? `前台进程：${command}` : '',
+    hint,
+    colorLabel ? `标签颜色：${colorLabel}` : '',
+    '拖动可排序，拖到组名加入分组',
+  ].filter(Boolean).join('\n');
 }
 
 export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, layout, onLayoutChange: change }: {
@@ -90,7 +101,7 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
     return () => observer.disconnect();
   }, [selected, collapsedKey]);
   const renderSession = (session: SessionInfo) => {
-    const { name, folder, agent } = sessionLabel(session);
+    const { name, folder } = sessionLabel(session);
     const active = selected === session.id;
     const state = !reachable ? 'offline' : session.running ? 'live' : 'ended';
     const hint = !reachable ? '状态同步已断开' : session.running ? '会话运行中' : '会话已结束';
@@ -103,10 +114,9 @@ export function SessionTabs({ sessions, selected, reachable, onSelect, onClose, 
       draggable onDragStart={event => startDrag(event, {kind:'session',id:session.id})} onDragEnd={stopDrag}
       onDragOver={event => over(event, sessionDrop(event, session.id))} onDrop={event => drop(event, sessionDrop(event, session.id))}
       onContextMenu={event => sessionMenu(event, session, true)}>
-      <button className="session-select" draggable aria-pressed={active} title={`${name}\n${session.cwd}\n${hint}${colorInfo ? `\n标签颜色：${colorInfo.label}` : ''}\n拖动可排序，拖到组名加入分组`} onClick={() => onSelect(session.id)}>
+      <button className="session-select" draggable aria-pressed={active} title={sessionTooltip(session, hint, colorInfo?.label)} onClick={() => onSelect(session.id)}>
         <span className={`dot ${state}${outputActive ? ' output-active' : ''}`} aria-label={outputActive ? '终端正在输出' : hint} />
         {state === 'live' && session.progress && <TerminalProgressIndicator progress={session.progress} />}
-        {agent && <span className={`command-icon ${agent}`} aria-label={agent}>{agent === 'claude' ? '✳' : '›_'}</span>}
         <strong>{name}</strong><small>{folder}</small>
       </button>
       <button className="tab-more" aria-label={`${name} 的标签菜单`} title="标签菜单（也可右键标签）" aria-haspopup="menu" aria-expanded={menu?.kind === 'session' && menu.session.id === session.id} onClick={event => sessionMenu(event, session)}>⋯</button>

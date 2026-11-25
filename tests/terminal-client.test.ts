@@ -4,7 +4,7 @@ import headless from '@xterm/headless';
 import type { Terminal } from '@xterm/xterm';
 import { suppressTerminalResponses } from '../src/client/terminalResponses.ts';
 import { isFocusReport } from '../src/client/terminalInteraction.ts';
-import { sessionLabel } from '../src/client/SessionTabs.tsx';
+import { sessionLabel, sessionTooltip } from '../src/client/SessionTabs.tsx';
 
 test('浏览器不重复回答终端查询，输入模式照常更新', async () => {
   const term = new headless.Terminal({ allowProposedApi: true });
@@ -23,7 +23,24 @@ test('标题采用 OSC 原文，保留动画字符并支持任意 CLI', () => {
   assert.equal(sessionLabel({ ...base, processName: 'some-cli', title: '⠋ 正在构建' }).name, '⠋ 正在构建');
   assert.equal(sessionLabel({ ...base, processName: 'zsh', title: 'Shell 提供的标题' }).name, 'Shell 提供的标题');
   assert.equal(sessionLabel({ ...base, processName: 'some-cli' }).name, 'some-cli');
-  assert.equal(sessionLabel({ ...base, processName: 'claude', title: '终端画面验证' }).agent, 'claude');
+  assert.equal(sessionLabel({ ...base, processName: 'claude', title: '终端画面验证' }).command, 'claude');
+  assert.equal(sessionLabel({ ...base, processName: 'agy', title: '终端画面验证' }).command, 'agy');
+  assert.equal(sessionLabel({ ...base, processName: '/usr/bin/zsh', title: 'Shell 提供的标题' }).command, 'zsh');
+  assert.equal('agent' in sessionLabel({ ...base, processName: 'claude', title: '终端画面验证' }), false);
+});
+
+test('悬停提示补充运行中会话的前台进程名', () => {
+  const base = { id: 'test', name: '终端', cwd: '/home/me/project', createdAt: '', running: true };
+  assert.equal(
+    sessionTooltip({ ...base, processName: 'claude', title: '✳ 终端画面验证' }, '会话运行中', '蓝色'),
+    '✳ 终端画面验证\n/home/me/project\n前台进程：claude\n会话运行中\n标签颜色：蓝色\n拖动可排序，拖到组名加入分组',
+  );
+  assert.equal(
+    sessionTooltip({ ...base, processName: '/usr/local/bin/agy', title: '任务讨论' }, '会话运行中'),
+    '任务讨论\n/home/me/project\n前台进程：agy\n会话运行中\n拖动可排序，拖到组名加入分组',
+  );
+  assert(!sessionTooltip({ ...base, running: false, processName: 'claude' }, '会话已结束').includes('前台进程：'));
+  assert(!sessionTooltip({ ...base, title: '终端' }, '会话运行中').includes('前台进程：'));
 });
 
 test('焦点报告与真实输入分开识别', () => {
