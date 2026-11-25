@@ -2,18 +2,24 @@
 /* 标签栏使用接近 VS Code 的文字和控件尺寸。 */
 .tabs-bar{position:relative;display:flex;flex:none;align-items:center;min-width:0;min-height:32px;background:#0d1821;border-bottom:1px solid #263640;padding:3px 5px;gap:3px;font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:12px;container-type:inline-size}
 .session-list{display:flex;align-items:stretch;gap:2px;overflow-x:auto;overflow-y:hidden;min-width:0;flex:1;scrollbar-width:none}.session-list::-webkit-scrollbar{display:none}
-.session{display:flex;align-items:center;flex:0 0 var(--tab-width,240px);width:var(--tab-width,240px);min-width:64px;max-width:240px;height:26px;container:session-tab / inline-size;border-radius:4px;background:#13212b}
-.session.active{background:#263a45;box-shadow:inset 0 -1px #80cdbf}
-.session.colored{background-color:color-mix(in srgb,var(--tab-color) 30%,#10161c);background-image:linear-gradient(to bottom,var(--tab-color) 0 2px,transparent 2px 100%);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tab-color) 32%,transparent);transition:background-color .15s}
-.session.colored:hover{background-color:color-mix(in srgb,var(--tab-color) 37%,#141c23)}
-.session.colored.active{background-color:color-mix(in srgb,var(--tab-color) 40%,#162028);box-shadow:inset 0 -1px var(--tab-color),inset 0 0 0 1px color-mix(in srgb,var(--tab-color) 62%,transparent)}
-.session.colored.active:hover{background-color:color-mix(in srgb,var(--tab-color) 46%,#18242d)}
-.session.colored .session-select:hover:not(:disabled){background:transparent}
-.session.colored .session-select strong{color:#f3f8fa}
-.session.colored .session-select small{color:#dce8ee}
-.session.colored .end,.session.colored .tab-more{color:#dce8ee}
-.session.colored .tab-more:hover:not(:disabled),.session.colored .end:hover:not(:disabled){background:#ffffff24;color:#ffffff}
+.session{display:flex;align-items:center;flex:0 0 var(--tab-width,240px);width:var(--tab-width,240px);min-width:64px;max-width:240px;height:26px;container:session-tab / inline-size;border-radius:4px;background-color:#13212b;transition:background-color .15s}
+.session:hover{background-color:#1b2d3a}
+.session .session-select:hover:not(:disabled){background:transparent}
+.session .session-select strong{color:#c8d7df}
+.session .tab-more:hover:not(:disabled),.session .end:hover:not(:disabled){background:#ffffff24;color:#ffffff}
+.session.colored{background-color:color-mix(in srgb,var(--tab-color) 18%,#111b23)}
+.session.colored:hover{background-color:color-mix(in srgb,var(--tab-color) 25%,#15222c)}
+.session.colored .session-select strong{color:#d9e5ea}
+.session.colored .session-select small{color:#a3b9c3}
+.session.colored .end,.session.colored .tab-more{color:#bdd1db}
 .session.colored .dot.live:not(.output-active){box-shadow:0 0 0 1.5px #0d182199}
+.session.active{background-color:#2b4b59;box-shadow:inset 0 -2px #7de8d4,inset 0 0 0 1px #64cbb973}
+.session.active:hover{background-color:#315463}
+.session.colored.active{background-color:color-mix(in srgb,var(--tab-color) 36%,#1d2f3b);box-shadow:inset 0 -2px color-mix(in srgb,var(--tab-color) 85%,#ffffff),inset 0 0 0 1px color-mix(in srgb,var(--tab-color) 62%,transparent)}
+.session.colored.active:hover{background-color:color-mix(in srgb,var(--tab-color) 42%,#213542)}
+.session.active .session-select strong,.session.colored.active .session-select strong{color:#ffffff;font-weight:500}
+.session.active .session-select small,.session.colored.active .session-select small{color:#cce2ea}
+.session.active .end,.session.active .tab-more,.session.colored.active .end,.session.colored.active .tab-more{color:#dcecf2}
 .session-select{display:flex;align-items:center;gap:4px;flex:1;min-width:0;height:26px;text-align:left;background:transparent;border:0;border-radius:4px;padding:3px 4px;overflow:hidden}
 .session-select strong{flex:1;min-width:0;font-size:12px;font-weight:400;line-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .session-select small{flex:0 1 auto;font-size:11px;color:#849da7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:44px}
