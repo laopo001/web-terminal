@@ -307,3 +307,48 @@ test('服务端按实时粘贴模式生成输入，图片路径不自动提交',
     await terminal.waitFor('BYTES:' + expected); terminal.ws.terminate();
   } finally { await f.close(); }
 });
+
+test('cd 到其他目录并运行前台子进程时，实时同步 cwd 且相对路径支持回退解析', async () => {
+  const f = await fixture();
+  const sockets: WebSocket[] = [];
+  try {
+    const dirA = f.workspace;
+    const dirB = join(f.root, 'other-dir');
+    await mkdir(join(dirB, 'nested'), { recursive: true });
+    await writeFile(join(dirA, 'only-a.txt'), 'from-a');
+    await writeFile(join(dirA, 'shared.txt'), 'shared-a');
+    await writeFile(join(dirB, 'nested', 'only-b.txt'), 'from-b');
+    await writeFile(join(dirB, 'shared.txt'), 'shared-b');
+
+    const { id } = await (await f.api('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+    const observer = await watchSessions(f.url(), f.config.token); sockets.push(observer.ws);
+    const terminal = await connect(f.url(), f.config.token, id); sockets.push(terminal.ws);
+
+    const started = Date.now();
+    terminal.send(`cd ${JSON.stringify(dirB)} && sleep 10\r`);
+    await observer.waitFor(list => list.some(s => s.id === id && s.cwd === dirB && s.processName?.endsWith('sleep')));
+    assert.ok(Date.now() - started < 3000, 'cd 后应在远短于 5 秒轮询间隔内推送最新 cwd');
+
+    const endpoint = `/api/sessions/${id}/files/`;
+    // 1. 不传 base（如 snapshot/重绘回退）：直接使用当前目录 dirB
+    const noBaseMeta = await f.api(endpoint + 'meta?path=' + encodeURIComponent('nested/only-b.txt'));
+    assert.equal(noBaseMeta.status, 200);
+    assert.equal((await noBaseMeta.json()).path, join(dirB, 'nested', 'only-b.txt'));
+
+    // 2. 传入旧目录 base=dirA 请求仅在新目录 dirB 存在的文件：自动回退到 dirB
+    const fallbackMeta = await f.api(endpoint + 'meta?path=' + encodeURIComponent('nested/only-b.txt') + '&base=' + encodeURIComponent(dirA));
+    assert.equal(fallbackMeta.status, 200);
+    assert.equal((await fallbackMeta.json()).path, join(dirB, 'nested', 'only-b.txt'));
+
+    // 3. 传入旧目录 base=dirA 请求仅在旧目录存在的历史文件：优先命中 dirA
+    const historyMeta = await f.api(endpoint + 'meta?path=' + encodeURIComponent('only-a.txt') + '&base=' + encodeURIComponent(dirA));
+    assert.equal(historyMeta.status, 200);
+    assert.equal((await historyMeta.json()).path, join(dirA, 'only-a.txt'));
+
+    // 4. 两个目录都有同名文件时，带旧 base 命中旧目录，无 base 或新 base 命中新目录
+    const sharedOld = await f.api(endpoint + 'content?path=shared.txt&base=' + encodeURIComponent(dirA));
+    assert.equal(await sharedOld.text(), 'shared-a');
+    const sharedNew = await f.api(endpoint + 'content?path=shared.txt');
+    assert.equal(await sharedNew.text(), 'shared-b');
+  } finally { for (const socket of sockets) socket.terminate(); await f.close(); }
+});

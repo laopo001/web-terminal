@@ -18,6 +18,7 @@ import { UploadThumbnail } from './UploadThumbnail';
 import { enableTerminalClipboard, writeClipboardText } from './terminalClipboard';
 import type { InteractionMode } from './clientSettings';
 import { manageTerminalInputFocus } from './inputFocus';
+import { LineBaseTracker } from './terminalLineBases';
 
 type Attachment = { id: number; file: File; state: string; failed: boolean; text?: string; path?: string };
 
@@ -96,12 +97,11 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   const copyText = useCallback((text: string) => {
     void writeClipboardText(text).then(() => setNotice(`已复制 ${Array.from(text).length} 个字符`)).catch(error => setNotice(`复制失败：${errorText(error)}`));
   }, [setNotice]);
-  useEffect(() => { cwdRef.current = session.cwd; }, [session.cwd]);
+  useLayoutEffect(() => { cwdRef.current = session.cwd; }, [session.cwd]);
   const revokeHover = useCallback(() => { hoverGeneration.current++; if (hoverTimer.current !== null) clearTimeout(hoverTimer.current); hoverTimer.current = null; if (hoverUrl.current) URL.revokeObjectURL(hoverUrl.current); hoverUrl.current = null; setHover(null); }, []);
   const revokePreview = useCallback(() => { previewGeneration.current++; if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); previewUrl.current = null; setPreview(null); }, []);
   const handleApiError = useCallback((error: unknown, message: string) => { if (error instanceof UnauthorizedError) logout(); else setNotice(`${message}：${errorText(error)}`); }, [logout, setNotice]);
   const inspect = useCallback(async (path: string, base: string, target: 'hover' | 'preview', point?: { x: number; y: number }) => {
-    if (!path.startsWith('/') && !path.startsWith('~/') && !base) { setNotice('历史相对路径的工作目录无法确定，请使用绝对路径'); return; }
     const id = sessionId, key = token;
     const generation = target === 'hover' ? hoverGeneration.current : ++previewGeneration.current;
     if (!mounted.current) return;
@@ -140,7 +140,6 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
   const activatePath = useCallback(async (path: string, base: string) => {
     revokeHover();
     if (!isVsCodeEmbed()) { await inspect(path, base, 'preview'); return; }
-    if (!path.startsWith('/') && !path.startsWith('~/') && !base) { setNotice('历史相对路径的工作目录无法确定，请使用绝对路径'); return; }
     try {
       const file = await api<FileInfo>(token, urlFor(sessionId, 'meta', path, base || undefined));
       if (mounted.current && activeRef.current) window.parent.postMessage({ type: 'web-terminal:open-file', path: file.path }, '*');
@@ -170,18 +169,18 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
     if (!sessionId || !token || !terminalHost.current) { setStatus('未连接'); return; }
     readyRef.current = false;
     let disposed = false, reconnectTimer: number | undefined, retry = 0, ws: WebSocket | null = null;
-    const lineBases = new Map<number, string>();
+    const lineBases = new LineBaseTracker();
     let renderQueue = Promise.resolve();
     let reconnectScrollLine: number | undefined;
     let liveOutput = false;
     const linkHandlers = {
-      base: (row: number) => lineBases.get(row) ?? '',
+      base: (row: number): string => lineBases.get(term, row),
       activatePath: (path: string, base: string) => { void activatePath(path, base); },
       activateUrl,
       hover: (path: string, base: string, point: { x: number; y: number }) => { revokeHover(); hoverTimer.current = window.setTimeout(() => { void inspect(path, base, 'hover', point); }, 300); },
       leave: revokeHover,
     };
-    const term = new Terminal({ cursorBlink: true, scrollSensitivity: SCROLL_SENSITIVITY, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true, linkHandler: createOscLinkHandler(linkHandlers) });
+    const term: Terminal = new Terminal({ cursorBlink: true, scrollback: 2000, scrollSensitivity: SCROLL_SENSITIVITY, fontFamily: fontRef.current, fontSize: window.matchMedia('(hover: none) and (pointer: coarse)').matches ? 12 : 14, theme: { background: '#101821', foreground: '#d8e3e8', cursor: '#7bdfcd', selectionBackground: '#356b71aa' }, allowProposedApi: true, linkHandler: createOscLinkHandler(linkHandlers) });
     const responses = suppressTerminalResponses(term);
     const clipboard = enableTerminalClipboard(term, {
       canWrite: () => !disposed && liveOutput && activeRef.current && !document.hidden && document.hasFocus(),
@@ -271,13 +270,10 @@ export function SessionPane({ session, token, active, fontFamily, interactionMod
             retry = 0; readyRef.current = true; setStatus('已连接');
             cwdRef.current = msg.session.cwd; resize();
           } else if (msg.type === 'output') {
-            const start = term.buffer.active.baseY + term.buffer.active.cursorY, base = cwdRef.current;
+            const base = cwdRef.current;
             liveOutput = true;
-            try { await write(msg.data); } finally { liveOutput = false; }
+            try { await lineBases.recordOutput(term, base, () => write(msg.data), () => disposed); } finally { liveOutput = false; }
             if (disposed) return;
-            const end = term.buffer.active.baseY + term.buffer.active.cursorY;
-            for (let row = start; row <= end; row++) lineBases.set(row, base);
-            for (const row of lineBases.keys()) if (row < term.buffer.active.baseY - 2000) lineBases.delete(row);
           } else if (msg.type === 'exit') { readyRef.current = false; setStatus(`Shell 已退出 · ${msg.exitCode}`); }
           else if (msg.type === 'error') {
             if (msg.message.startsWith('会话已结束')) { readyRef.current = false; setStatus('会话已结束'); }

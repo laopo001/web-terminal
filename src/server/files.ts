@@ -32,7 +32,18 @@ export class Files {
   async read(cwd: string, path: string, base?: string) {
     if (!path || path.includes('\0') || path.length > 8192) throw new HttpError(400, '文件路径无效');
     const expanded = path.startsWith('~/') ? join(process.env.HOME || cwd, path.slice(2)) : path;
-    const canonical = await realpath(resolve(base || cwd, expanded));
+    const relative = !path.startsWith('/') && !path.startsWith('~/');
+    let canonical: string;
+    if (relative && base && base !== cwd) {
+      try { canonical = await realpath(resolve(base, expanded)); }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+        canonical = await realpath(resolve(cwd, expanded));
+      }
+    } else {
+      canonical = await realpath(resolve(base || cwd, expanded));
+    }
     const handle = await open(canonical, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const stat = await handle.stat();

@@ -14,6 +14,7 @@ import { Files, HttpError } from './files.ts';
 interface Session {
   info: SessionInfo; process?: pty.IPty; clients: Map<WebSocket, { cols: number; rows: number }>; controller?: WebSocket; screen: TerminalScreen; pendingBytes: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  cwdTimer?: ReturnType<typeof setTimeout>;
 }
 export function send(ws: WebSocket, message: ServerMessage) {
   if (ws.readyState !== 1) return;
@@ -92,6 +93,23 @@ export class Sessions {
     catch (error) { console.error('会话状态更新失败', error); }
     finally { this.refreshing = false; }
   }
+  private async refreshSession(session: Session) {
+    if (this.shuttingDown || this.entries.get(session.info.id) !== session || !session.info.running) return;
+    const previousCwd = session.info.cwd, previousProcess = session.info.processName;
+    try {
+      const updated = await this.current(session.info.id);
+      if (!this.shuttingDown && this.entries.get(session.info.id) === session && (updated.cwd !== previousCwd || updated.processName !== previousProcess)) {
+        this.publish();
+      }
+    } catch { /* 会话可能刚退出 */ }
+  }
+  private scheduleCwdRefresh(session: Session, delay = 150) {
+    clearTimeout(session.cwdTimer);
+    session.cwdTimer = setTimeout(() => {
+      session.cwdTimer = undefined;
+      void this.refreshSession(session);
+    }, delay);
+  }
   private stopActivity(session: Session) {
     clearTimeout(session.activityTimer); session.activityTimer = undefined;
     session.info.outputActive = false;
@@ -99,7 +117,12 @@ export class Sessions {
   private outputActivity(session: Session) {
     clearTimeout(session.activityTimer);
     if (!session.info.outputActive) { session.info.outputActive = true; this.publish(); }
-    session.activityTimer = setTimeout(() => { this.stopActivity(session); this.publish(); }, 800);
+    session.activityTimer = setTimeout(() => {
+      this.stopActivity(session);
+      void this.current(session.info.id).catch(() => undefined).finally(() => {
+        if (!this.shuttingDown && this.entries.get(session.info.id) === session) this.publish();
+      });
+    }, 800);
   }
   async create(name?: unknown, cwd?: unknown) {
     if (this.entries.size >= 32) throw new HttpError(409, '最多保留 32 个会话，请结束不需要的会话');
@@ -151,7 +174,7 @@ export class Sessions {
       session.process = undefined;
       if (this.shuttingDown) return;
       void session.screen.run(() => {
-        session.info.running = false; session.info.progress = undefined; this.stopActivity(session); this.save(); this.publish();
+        session.info.running = false; session.info.progress = undefined; this.stopActivity(session); clearTimeout(session.cwdTimer); session.cwdTimer = undefined; this.save(); this.publish();
         for (const ws of session.clients.keys()) { send(ws, { type: 'exit', exitCode }); ws.close(4404, '会话已结束'); }
         session.clients.clear(); session.controller = undefined;
       });
@@ -195,7 +218,11 @@ export class Sessions {
   }
   input(id: string, ws: WebSocket, data: string) {
     const session = this.get(id);
-    void session.screen.run(() => { if (session.clients.has(ws)) session.process?.write(data); });
+    void session.screen.run(() => {
+      if (!session.clients.has(ws)) return;
+      session.process?.write(data);
+      if (/[\r\n]/.test(data)) this.scheduleCwdRefresh(session);
+    });
   }
   paste(id: string, ws: WebSocket, text: string, submit: boolean) {
     const session = this.get(id);
@@ -205,7 +232,10 @@ export class Sessions {
       process.write(pasteText(text, session.screen.terminal.modes.bracketedPasteMode));
       if (submit) {
         await new Promise(resolve => setTimeout(resolve, 100));
-        if (session.process === process && session.info.running) process.write('\r');
+        if (session.process === process && session.info.running) {
+          process.write('\r');
+          this.scheduleCwdRefresh(session);
+        }
       }
     });
   }
@@ -225,6 +255,7 @@ export class Sessions {
   async remove(id: string) {
     const session = this.get(id);
     this.stopActivity(session);
+    clearTimeout(session.cwdTimer); session.cwdTimer = undefined;
     session.process?.kill();
     for (const ws of session.clients.keys()) ws.close(1000, '会话已结束');
     this.entries.delete(id); this.save();
@@ -239,6 +270,7 @@ export class Sessions {
     this.watchers.clear();
     for (const session of this.entries.values()) {
       this.stopActivity(session);
+      clearTimeout(session.cwdTimer); session.cwdTimer = undefined;
       for (const ws of session.clients.keys()) ws.close(1012, '服务重启中');
       session.process?.kill();
     }

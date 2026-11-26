@@ -11,7 +11,11 @@ export async function foregroundInfo(pid: number, fallback: string) {
   } catch { /* 保留 Shell PID */ }
   let processName = basename(fallback).replace(/^-/, '');
   let cwd: string | undefined;
-  try { cwd = await readlink(`/proc/${foreground}/cwd`); } catch { /* 进程可能刚退出 */ }
+  try { cwd = await readlink(`/proc/${foreground}/cwd`); } catch {
+    if (foreground !== pid) {
+      try { cwd = await readlink(`/proc/${pid}/cwd`); } catch { /* 进程可能刚退出 */ }
+    }
+  }
   try {
     const executable = await readlink(`/proc/${foreground}/exe`);
     if (/\/claude\/versions\//.test(executable)) processName = 'claude';

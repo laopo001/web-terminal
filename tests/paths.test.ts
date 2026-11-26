@@ -4,6 +4,7 @@ import headless from '@xterm/headless';
 import type { Terminal } from '@xterm/xterm';
 import { findLinks, findPaths, findUrls, isImagePath, isTextPath, quoteForShell, unwrapTerminalRows } from '../src/client/paths.ts';
 import { createOscLinkHandler, terminalLinkProvider } from '../src/client/links.ts';
+import { LineBaseTracker } from '../src/client/terminalLineBases.ts';
 import { parseExternalUrl, parseFileUriPath } from '../src/shared/externalUrl.ts';
 
 test('recognizes markdown, Chinese and quoted paths with spaces', () => {
@@ -161,4 +162,48 @@ test('终端 LinkProvider 与 OSC 8 LinkHandler 统一分发本地文件与外�
   assert.equal(wrappedLinks[0].text, 'https://github.com/LoveRain1997/h3-prompt-journal.git');
   assert.deepEqual(wrappedLinks[0].range, { start: { x: 9, y: 1 }, end: { x: 21, y: 2 } });
   wrappedTerm.dispose();
+});
+
+test('LineBaseTracker 支持 TUI 光标上移重绘、滚屏挤出偏移和备选缓冲隔离', async () => {
+  const write = (term: InstanceType<typeof headless.Terminal>, tracker: LineBaseTracker, base: string, data: string) =>
+    tracker.recordOutput(term, base, () => new Promise<void>(resolve => term.write(data, resolve)));
+  const findRow = (term: InstanceType<typeof headless.Terminal>, needle: string) => {
+    const buffer = term.buffer.active;
+    for (let row = 0; row < buffer.length; row++) {
+      if (buffer.getLine(row)?.translateToString(true).includes(needle)) return row;
+    }
+    return -1;
+  };
+
+  // 1. TUI 光标上移重绘中间行，同时保留未改动老行的目录
+  const tui = new headless.Terminal({ cols: 80, rows: 8, scrollback: 20, allowProposedApi: true });
+  const tuiTracker = new LineBaseTracker();
+  await write(tui, tuiTracker, '/dir-a', 'old-0 ./a.txt\r\nold-1\r\nold-2\r\nold-3\r\nold-4\r\n');
+  await write(tui, tuiTracker, '/dir-b', '\x1b[3A\x1b[2Kupdated ./b.txt\x1b[3B\r\nfooter\r\n');
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'old-0 ./a.txt')), '/dir-a');
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'updated ./b.txt')), '/dir-b');
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'footer')), '/dir-b');
+
+  // 2. 滚屏挤出超出 scrollback 后，存活行仍保持原工作目录
+  const scroll = new headless.Terminal({ cols: 40, rows: 4, scrollback: 5, allowProposedApi: true });
+  const scrollTracker = new LineBaseTracker();
+  await write(scroll, scrollTracker, '/dir-a', 'a0\r\na1\r\na2 ./keep.txt\r\n');
+  await write(scroll, scrollTracker, '/dir-b', 'b1\r\nb2\r\nb3\r\nb4\r\nb5\r\n');
+  const rowA2 = findRow(scroll, 'a2 ./keep.txt');
+  const rowB5 = findRow(scroll, 'b5');
+  assert.ok(rowA2 >= 0, 'a2 应仍在 scrollback 中');
+  assert.equal(scrollTracker.get(scroll, rowA2), '/dir-a');
+  assert.equal(scrollTracker.get(scroll, rowB5), '/dir-b');
+
+  // 3. 备选缓冲与主缓冲互不覆盖，退出时新增输出使用新目录、clear() 后清空
+  await write(tui, tuiTracker, '/dir-b', '\x1b[?1049hfullscreen ./alt.txt');
+  assert.equal(tuiTracker.get(tui, 0), '/dir-b');
+  await write(tui, tuiTracker, '/dir-b', '\x1b[?1049lafter-alt ./done.txt\r\n');
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'old-0 ./a.txt')), '/dir-a');
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'after-alt ./done.txt')), '/dir-b');
+  tuiTracker.clear();
+  assert.equal(tuiTracker.get(tui, findRow(tui, 'old-0 ./a.txt')), '');
+
+  tui.dispose();
+  scroll.dispose();
 });
